@@ -1,5 +1,6 @@
 #include "list.h"
 
+
 int
 list_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
 {
@@ -22,6 +23,14 @@ list_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
     return 0;
 }
 
+int list_new_node(PMEMobjpool *pop, TOID(struct list_node) *node) {
+    struct list_node arg = {
+        .prev = *node,
+        .next = *node
+    };
+    return POBJ_NEW(pop, node, struct list_node, list_node_constr,&arg);
+}
+
 static int
 list_head_constr(PMEMobjpool *pop, void *ptr, void *arg)
 {
@@ -42,7 +51,7 @@ list_head_constr(PMEMobjpool *pop, void *ptr, void *arg)
 // the address of root object may vary due to the change of size
 // be cautious when storing a pointer pointing to this root in other objects
 int
-new_list(PMEMobjpool *pop, TOID(struct list) *list)
+list_new(PMEMobjpool *pop, TOID(struct list) *list)
 {
     // POBJ_ROOT will allocate space or retrive exsiting root
     *list = POBJ_ROOT(pop, struct list);

@@ -24,9 +24,10 @@ typedef struct list {
 int
 list_node_constr(PMEMobjpool *pop, void *ptr, void *arg);
 
+int list_new_node(PMEMobjpool *pop, TOID(struct list_node) *node);
 
 int
-new_list(PMEMobjpool *pop, TOID(struct list) *list);
+list_new(PMEMobjpool *pop, TOID(struct list) *list);
 
 void
 list_add_to_head(PMEMobjpool *pop,

@@ -13,218 +13,354 @@
 #include "queue.h"
 #include "bplustree.h"
 
+#define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
+
 // insertion
-static bpt_node_t *bpt_new_leaf();
-static bpt_node_t *bpt_new_non_leaf();
-static void bpt_insert_child(bpt_node_t *old, bpt_node_t * new);
-static int bpt_complex_insert(bpt_t *t, bpt_node_t *leaf,
-                              char *key, char *value);
-static int bpt_simple_insert(bpt_node_t *leaf, char *key, char *value);
-static int bpt_insert_adjust(bpt_t * t, bpt_node_t *old, bpt_node_t *new);
-static bpt_node_t *find_leaf(bpt_t *t, char *key);
-static bpt_node_t *find_non_leaf(bpt_t *t, char *key);
+static int
+bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node);
+
+static int
+bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node);
+
+static int
+bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
+                   TOID(struct bpt_node) *leaf, char *key, char *value);
+static int
+bpt_simple_insert(PMEMobjpool *pop,
+                  TOID(struct bpt_node) *leaf, char *key, char *value);
+static void
+bpt_insert_child(PMEMobjpool *pop,
+                 TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);
+
+static int
+bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);
+
+static TOID(struct bpt_node) *
+find_leaf(TOID(struct bpt) *t, char *key);
+
+static TOID(struct bpt_node) *
+find_non_leaf(TOID(struct bpt) *t, char *key);
 
 // deletion
-static bool bpt_is_root(bpt_node_t *t);
-static int bpt_insert_key(bpt_node_t *t, char *key);
-static bpt_node_t* bpt_check_redistribute(bpt_node_t *t);
-static int redistribute_leaf(bpt_t *t, bpt_node_t *leaf, char *key);
-static int redistribute_internal(char *split_key, bpt_node_t *parent,
-                                 bpt_node_t *left, bpt_node_t *right);
-static bpt_node_t* merge_leaves(bpt_t *t, bpt_node_t *leaf, char *key);
-static int merge(bpt_t *t, bpt_node_t *parent, char *key, char *split_key);
-static int bpt_remove_key_and_data(bpt_node_t *node, char *key);
-static int bpt_complex_delete(bpt_t *t, bpt_node_t *leaf, char *key);
-static int bpt_simple_delete(bpt_t *t, bpt_node_t *leaf, char *key);
-static void bpt_free_leaf(bpt_node_t *leaf);
-static void bpt_free_non_leaf(bpt_node_t *nleaf);
+static bool
+bpt_is_root(const TOID(struct bpt_node) *t);
 
-bpt_t *bpt_new();
-int bpt_insert(bpt_t *t, char *key, char *value);
-int bpt_delete(bpt_t *t, char *key);
-int bpt_get(bpt_t *t, char *key, char *buffer);
-int bpt_range(bpt_t *t, char *start, char *end, char **buffer);
-int bpt_destroy(bpt_t *t);
+static int
+bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, char *key);
+
+static const TOID(struct bpt_node) *
+bpt_check_redistribute(const TOID(struct bpt_node) *t);
+
+static int
+redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *leaf, char *key);
+
+static int
+redistribute_internal(PMEMobjpool *pop, char *split_key,
+                      TOID(struct bpt_node) *parent, TOID(struct bpt_node) *left,
+                      TOID(struct bpt_node) *right);
+
+static TOID(struct bpt_node) *
+merge_leaves(PMEMobjpool *pop,
+             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key);
+
+static int
+merge(bpt_t *t, bpt_node_t *parent, char *key, char *split_key);
+
+static int
+bpt_remove_key_and_data(PMEMobjpool *pop,
+                        TOID(struct bpt_node) *node, char *key);
+
+static int
+bpt_complex_delete(bpt_t *t, bpt_node_t *leaf, char *key);
+
+static int
+bpt_simple_delete(PMEMobjpool *pop,
+                  TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key);
+
+static void
+bpt_free_leaf(TOID(struct bpt_node) *leaf);
+
+static void
+bpt_free_non_leaf(TOID(struct bpt_node) *nleaf);
+
+
+int
+bpt_new(PMEMobjpool *pop, TOID(struct bpt) *t);
+
+int
+bpt_insert(PMEMobjpool *pop, TOID(struct bpt) *t, char *key, char *value);
+
+int
+bpt_delete(bpt_t *t, char *key);
+
+int
+bpt_get(TOID(struct bpt) *t, char *key, char *buffer);
+
+int
+bpt_range(TOID(struct bpt) *t, char *start, char *end, char **buffer);
+
+int
+bpt_destroy(TOID(struct bpt) *t);
+
 int bpt_serialize_f(bpt_t *t, char *file_name);
+
 int bpt_serialize_fp(bpt_t *t, FILE *fp);
-void bpt_print(bpt_t * t);
-void bpt_print_leaves(bpt_t *t);
 
-bpt_t *bpt_new() {
-    bpt_t *bpt = malloc(sizeof(bpt_t));
-    bpt->root = bpt_new_leaf();
-    
-    bpt->list = new_list();
-    list_add(bpt->list->head, &bpt->root->link);
-    
-    bpt->nodes = 0;
-    bpt->level = 1;
-    return bpt;
+void
+bpt_print(TOID(struct bpt) *t);
 
+void
+bpt_print_leaves(const TOID(struct bpt) *t);
+
+static int
+bpt_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
+{
+    if (arg)
+        return -1;
+    TOID(struct bpt_node) *node = ptr;
+    struct bpt_node *node_ptr = D_RW(*node);
+    list_new_node(pop, &node_ptr->link);
+    return 0;
 }
 
-static bpt_node_t *bpt_new_leaf() {
-    bpt_node_t *node = malloc(sizeof(bpt_node_t));
-    //    node->link = new_list_node();
-    node->parent = NULL;
-    node->type = LEAF;
-    for (int i = 0; i < DEGREE; i++) {
-        node->keys[i] = NULL;
-        node->data[i] = NULL;        
-    }
-    return node;
+static int
+bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
+{
+    if (arg)
+        return -1;
+    TOID(struct bpt) *bpt = ptr;
+    struct bpt *bpt_ptr = D_RW(*bpt);
+
+    bpt_new_leaf(pop, &bpt_ptr->root);
+    struct bpt_node *root_ptr = D_RW(bpt_ptr->root);
+    
+    list_new(pop, &bpt_ptr->list);
+    list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
+
+    *bpt_ptr->free_key = NULL_STR;
+    bpt_ptr->level = 1;
+
+    pmemobj_persist(pop, bpt, sizeof(struct bpt));
+    return 0;
 }
 
-static bpt_node_t *bpt_new_non_leaf() {
-    bpt_node_t *node = malloc(sizeof(bpt_node_t));
-    node->parent = NULL;
-    node->type = NON_LEAF;
-    
+int
+bpt_new (PMEMobjpool *pop, TOID(struct bpt) *t) {
+    return POBJ_NEW(pop, t, struct bpt, bpt_constr, NULL);
+}
+
+static int
+bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
+{
+    POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
+    struct bpt_node *node_ptr = D_RW(*node);
+
+    // filed link is not initialized here, because interfaces in list.c
+    // will handle the initialization
+    node_ptr->parent = NULL_BPT_NODE;
+    node_ptr->type = LEAF;
     for (int i = 0; i < DEGREE; i++) {
-        node->keys[i] = NULL;
-        node->children[i] = NULL;        
+        node_ptr->keys[i] = NULL_STR;
+        node_ptr->data[i] = NULL_STR;        
     }
-    node->children[DEGREE] = NULL;
-    
-    return node;
+    pmemobj_persist(pop, node, sizeof(struct bpt_node));
+    return 1;
+}
+
+static int
+bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
+    POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
+    struct bpt_node *node_ptr = D_RW(*node);
+
+    // filed link is not initialized here, because interfaces in list.c
+    // will handle the initialization
+    node_ptr->parent = NULL_BPT_NODE;
+    node_ptr->type = NON_LEAF;
+    for (int i = 0; i < DEGREE; i++) {
+        node_ptr->keys[i] = NULL_STR;
+        node_ptr->children[i] = NULL_BPT_NODE;
+    }
+    node_ptr->children[DEGREE] = NULL_BPT_NODE;
+    pmemobj_persist(pop, node, sizeof(struct bpt_node));
+    return 1;
 }
 
 // outter function has determined that bpt_complex_insert should be called
 // we have to split the leaf and insert new node into parent node
 // adjustment to parent is necessary
-static int bpt_simple_insert(bpt_node_t *leaf, char *key, char *value) {
+static int
+bpt_simple_insert(PMEMobjpool *pop,
+                  TOID(struct bpt_node) *leaf, char *key, char *value)
+{
+    struct bpt_node *leaf_ptr = D_RW(*leaf);
+    
+    
     unsigned long long i;
-    for (i = 0; i < leaf->num_of_keys; i++) {
+    for (i = 0; i < leaf_ptr->num_of_keys; i++) {
         // if the tree is empty, we may encounter a NULL key
-        if (leaf->keys[i] == NULL || strcmp(leaf->keys[i], key) >= 0)
+        if (TOID_IS_NULL(leaf_ptr->keys[i]) ||
+            strcmp(str_get(&leaf_ptr->keys[i]), key) >= 0)
             break;
     }
 
-    for (unsigned long long j = leaf->num_of_keys; j > i; j--) {
-        leaf->keys[j] = leaf->keys[j - 1];
-        leaf->data[j] = leaf->data[j - 1];
+    for (unsigned long long j = leaf_ptr->num_of_keys; j > i; j--) {
+        leaf_ptr->keys[j] = leaf_ptr->keys[j - 1];
+        leaf_ptr->data[j] = leaf_ptr->data[j - 1];
     }
-    leaf->keys[i] = malloc(strlen(key) + 1);
-    leaf->data[i] = malloc(strlen(value) + 1);
-    strcpy(leaf->keys[i], key);
-    strcpy(leaf->data[i], value);
-    leaf->num_of_keys++; 
+    str_write(pop, &leaf_ptr->keys[i], key);
+    str_write(pop, &leaf_ptr->data[i], value);
+    leaf_ptr->num_of_keys++;
+    pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
     return 1;
 }
 
-static void bpt_insert_child(bpt_node_t *old, bpt_node_t * new) {
-    bpt_node_t *parent = old->parent;
+static void
+bpt_insert_child(PMEMobjpool *pop,
+                 TOID(struct bpt_node) *old, TOID(struct bpt_node) *new)
+{
+    struct bpt_node *old_ptr = D_RW(*old);
+    struct bpt_node *new_ptr = D_RW(*new);
+    struct bpt_node *parent_ptr = D_RW(old_ptr->parent);
     // insert
     unsigned long long i = 0;
     unsigned long long j = 0;
     // new inherits data from old, so we just need to insert new after old
-    for (i = 0; i < parent->num_of_children; i++) {
-        if (parent->children[i] == old)
+    for (i = 0; i < parent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(parent_ptr->children[i], *old))
             break;
     }
 
-    for (j = parent->num_of_keys; j > i; j--) {
-        parent->keys[j] = parent->keys[j-1];
+    for (j = parent_ptr->num_of_keys; j > i; j--) {
+        parent_ptr->keys[j] = parent_ptr->keys[j-1];
     }
-    parent->keys[i] = new->keys[0];
-    parent->num_of_keys++;
+    parent_ptr->keys[i] = new_ptr->keys[0];
+    parent_ptr->num_of_keys++;
 
     i++; // insert after old
-    for (j = parent->num_of_children; j > i; j--) {
-        parent->children[j] = parent->children[j-1];
+    for (j = parent_ptr->num_of_children; j > i; j--) {
+        parent_ptr->children[j] = parent_ptr->children[j-1];
     }
-    parent->children[i] = new;
-    parent->num_of_children++;
-    new->parent = parent;
+    parent_ptr->children[i] = *new;
+    parent_ptr->num_of_children++;
+    new_ptr->parent = old_ptr->parent;
+    pmemobj_persist(pop , old, sizeof(struct bpt_node));
+    pmemobj_persist(pop , new, sizeof(struct bpt_node));
  }
 
-static int bpt_insert_adjust(bpt_t *t, bpt_node_t *old, bpt_node_t *new) {
-    bpt_node_t *parent = old->parent;
-    if (t->level == 1) {
-        bpt_node_t *new_parent = bpt_new_non_leaf();
-        new_parent->num_of_children = 2;
-        new_parent->num_of_keys = 1;
-        new_parent->keys[0] = new->keys[0];
-        new_parent->children[0] = old;
-        new_parent->children[1] = new;
-        t->root = new_parent;
-        old->parent = new_parent;
-        new->parent = new_parent;
+static int
+bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *old, TOID(struct bpt_node) *new)
+{
+    struct bpt *t_ptr = D_RW(*t);
+    struct bpt_node *old_ptr = D_RW(*old);
+    struct bpt_node *new_ptr = D_RW(*new);
+    TOID(struct bpt_node) *parent = &old_ptr->parent;
+    struct bpt_node *parent_ptr = D_RW(old_ptr->parent);
+    
+    if (t_ptr->level == 1) {
+        // bpt_node_t *new_parent = bpt_new_non_leaf();
+        TOID(struct bpt_node) new_parent;
+        bpt_new_non_leaf(pop, &new_parent);
+        struct bpt_node *new_parent_ptr = D_RW(new_parent);
+        
+        new_parent_ptr->num_of_children = 2;
+        new_parent_ptr->num_of_keys = 1;
+        new_parent_ptr->keys[0] = new_ptr->keys[0];
+        new_parent_ptr->children[0] = *old;
+        new_parent_ptr->children[1] = *new;
+        t_ptr->root = new_parent;
+        old_ptr->parent = new_parent;
+        new_ptr->parent = new_parent;
 
-        t->level++;
+        t_ptr->level++;
+        pmemobj_persist(pop, t, sizeof(struct bpt));
+        pmemobj_persist(pop, &new_parent, sizeof(struct bpt_node));
+        pmemobj_persist(pop, new, sizeof(struct bpt_node));
+        pmemobj_persist(pop, old, sizeof(struct bpt_node));
         return 1;        
     }
     
-    if (!parent) {
+    if (!TOID_IS_NULL(old_ptr->parent)) {
         // this is internal node split
         // we may not just create a new root and link old and new to it
         // we must pick out the smallest child in new and use this child
         // to construct a new root, or we may not ensure the relationsip
         // that num_of_childen = num_of_keys + 1
-        bpt_node_t *new_parent = bpt_new_non_leaf();
-        new_parent->num_of_children = 2;
-        new_parent->num_of_keys = 1;
-        new_parent->keys[0] = new->keys[0];
-        new_parent->children[0] = old;
-        new_parent->children[1] = new;
-        t->root = new_parent;
-        t->level++;
+
+        TOID(struct bpt_node) new_parent;
+        bpt_new_non_leaf(pop, &new_parent);
+        struct bpt_node *new_parent_ptr = D_RW(new_parent);
+        new_parent_ptr->num_of_children = 2;
+        new_parent_ptr->num_of_keys = 1;
+        new_parent_ptr->keys[0] = new_ptr->keys[0];
+        new_parent_ptr->children[0] = *old;
+        new_parent_ptr->children[1] = *new;
+        t_ptr->root = new_parent;
+        t_ptr->level++;
 
         // delete the key copied to root in new
-        for (unsigned long long i = 1; i < new->num_of_keys; i++) {
-            new->keys[i-1] = new->keys[i];
+        for (unsigned long long i = 1; i < new_ptr->num_of_keys; i++) {
+            TOID_EQUALS(new_ptr->keys[i-1], new_ptr->keys[i]);
         }
-        new->keys[new->num_of_keys - 1] = NULL;
-        new->num_of_keys--;
+        new_ptr->keys[new_ptr->num_of_keys - 1] = NULL_STR;
+        new_ptr->num_of_keys--;
 
-        old->parent = new_parent;
-        new->parent = new_parent;
+        old_ptr->parent = new_parent;
+        new_ptr->parent = new_parent;
+        pmemobj_persist(pop, &new_parent, sizeof(struct bpt_node));
+        pmemobj_persist(pop, new, sizeof(struct bpt_node));
+        pmemobj_persist(pop, old, sizeof(struct bpt_node));
         // num_of_children will not be modified
         // we modify this field in else if
         
-    } else if (parent->num_of_keys == DEGREE - 1) {
+    } else if (parent_ptr->num_of_keys == DEGREE - 1) {
         // insert
         // new will be added to parent of old
-        bpt_insert_child(old, new); 
-        if (new->type == NON_LEAF) {
+        bpt_insert_child(pop, old, new); 
+        if (new_ptr->type == NON_LEAF) {
             // delete the key copied to parent in new
-            for (unsigned long long i = 1; i < new->num_of_keys; i++) {
-                new->keys[i-1] = new->keys[i];
+            for (unsigned long long i = 1; i < new_ptr->num_of_keys; i++) {
+                new_ptr->keys[i-1] = new_ptr->keys[i];
             }
-            new->keys[new->num_of_keys - 1] = NULL;
-            new->num_of_keys--;
+            new_ptr->keys[new_ptr->num_of_keys - 1] = NULL_STR;
+            new_ptr->num_of_keys--;
         }
         
         // split
         // [split] is NOT left to new parent
-        bpt_node_t * new_parent = bpt_new_non_leaf();
-        unsigned long long split = parent->num_of_keys / 2;
+        TOID(struct bpt_node) new_parent;
+        bpt_new_non_leaf(pop, &new_parent);
+        struct bpt_node *new_parent_ptr = D_RW(new_parent);
+        
+        unsigned long long split = parent_ptr->num_of_keys / 2;
         unsigned long long i = 0;
-        for (i = 0; i + split < parent->num_of_keys; i++) {
-            new_parent->keys[i] = parent->keys[i + split];
-            parent->keys[i + split] = NULL;
-            new_parent->children[i] = parent->children[i + split + 1];
-            new_parent->children[i ]->parent = new_parent;
-            parent->children[i + split + 1] = NULL;
+        for (i = 0; i + split < parent_ptr->num_of_keys; i++) {
+            new_parent_ptr->keys[i] = parent_ptr->keys[i + split];
+            parent_ptr->keys[i + split] = NULL_STR;
+            new_parent_ptr->children[i] = parent_ptr->children[i + split + 1];
+            D_RW(new_parent_ptr->children[i])->parent = new_parent;
+            parent_ptr->children[i + split + 1] = NULL_BPT_NODE;
         }
 
-        new_parent->num_of_keys = parent->num_of_keys - split;
-        new_parent->num_of_children = new_parent->num_of_keys;
-        parent->num_of_keys -= parent->num_of_keys - split;
-        parent->num_of_children = parent->num_of_keys + 1;
+        new_parent_ptr->num_of_keys = parent_ptr->num_of_keys - split;
+        new_parent_ptr->num_of_children = new_parent_ptr->num_of_keys;
+        parent_ptr->num_of_keys -= parent_ptr->num_of_keys - split;
+        parent_ptr->num_of_children = parent_ptr->num_of_keys + 1;
 
         
         // recursive handling
-        bpt_insert_adjust(t, parent, new_parent);
+        bpt_insert_adjust(pop, t, parent, &new_parent);
     } else {
-        bpt_insert_child(old, new);
-        if (new->type == NON_LEAF) {
+        bpt_insert_child(pop, old, new);
+        if (new_ptr->type == NON_LEAF) {
             // delete the key copied to parent in new
-            for (unsigned long long i = 1; i < new->num_of_keys; i++) {
-                new->keys[i-1] = new->keys[i];
+            for (unsigned long long i = 1; i < new_ptr->num_of_keys; i++) {
+                new_ptr->keys[i-1] = new_ptr->keys[i];
             }
-            new->keys[new->num_of_keys - 1] = NULL;
-            new->num_of_keys--;
+            new_ptr->keys[new_ptr->num_of_keys - 1] = NULL_STR;
+            new_ptr->num_of_keys--;
         }
     }
     return 1;
@@ -233,236 +369,303 @@ static int bpt_insert_adjust(bpt_t *t, bpt_node_t *old, bpt_node_t *new) {
 
 // outter function has determined to call this function
 // so leaf->num_of_keys = DEGREE - 1
-static int bpt_complex_insert(bpt_t *t, bpt_node_t *leaf, char *key,
-                              char *value) {
-    bpt_node_t *new_leaf = bpt_new_leaf();
+static int
+bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
+                   TOID(struct bpt_node) *leaf, char *key, char *value)
+{
+    TOID(struct bpt_node) new_leaf;
+    bpt_new_leaf(pop, &new_leaf);
+
+
+    struct bpt *t_ptr = D_RW(*t);
+    struct bpt_node* leaf_ptr = D_RW(*leaf);
+    struct bpt_node *new_leaf_ptr = D_RW(new_leaf);    
     // since we have make extra space
     // we may just insert the key and vlaue into old leaf and then split it
     // what good about this is that we do not have to consider where
     // new data should be inserted.
     unsigned long long i = 0;
-    for (i = 0; i < leaf->num_of_keys; i++) {
-        if(strcmp(leaf->keys[i], key) >= 0)
+    for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+        if(strcmp(str_get(&leaf_ptr->keys[i]), key) >= 0)
             break;
     }
 
-    for (unsigned long long j = leaf->num_of_keys; j > i; j--) {
-        leaf->keys[j] = leaf->keys[j - 1];
-        leaf->data[j] = leaf->data[j - 1];
+    for (unsigned long long j = leaf_ptr->num_of_keys; j > i; j--) {
+        leaf_ptr->keys[j] = leaf_ptr->keys[j - 1];
+        leaf_ptr->data[j] = leaf_ptr->data[j - 1];
     }
 
-    leaf->keys[i] = malloc((strlen(key)) + 1);
-    leaf->data[i] = malloc((strlen(value)) + 1);
+    str_new(pop, &leaf_ptr->keys[i], key);
+    str_new(pop, &leaf_ptr->keys[i], value);
 
-    strcpy(leaf->keys[i], key);
-    strcpy(leaf->data[i], value);
-    leaf->num_of_keys++;
+    leaf_ptr->num_of_keys++;
     
     // now split this leaf
     // copy the right half to new leaf (including [split])
-    unsigned long long split = leaf->num_of_keys / 2;
+    unsigned long long split = leaf_ptr->num_of_keys / 2;
 
-    for (i = 0; i + split < leaf->num_of_keys; i++) {
-        new_leaf->keys[i] = leaf->keys[i + split];
-        new_leaf->data[i] = leaf->data[i + split];
-        leaf->keys[i + split] = NULL;
-        leaf->data[i + split] = NULL;
+    for (i = 0; i + split < leaf_ptr->num_of_keys; i++) {
+        new_leaf_ptr->keys[i] = leaf_ptr->keys[i + split];
+        new_leaf_ptr->data[i] = leaf_ptr->data[i + split];
+        leaf_ptr->keys[i + split] = NULL_STR;
+        leaf_ptr->data[i + split] = NULL_STR;
     }
 
     // we ensure that new leaf is always on the right of leaf
-    new_leaf->num_of_keys = i;
-    leaf->num_of_keys -= leaf->num_of_keys - split;
+    new_leaf_ptr->num_of_keys = i;
+    leaf_ptr->num_of_keys -= leaf_ptr->num_of_keys - split;
     
-    list_add(&leaf->link, &new_leaf->link);
-    bpt_insert_adjust(t, leaf, new_leaf);
-
+    list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
+    bpt_insert_adjust(pop, t, leaf, &new_leaf);
+    pmemobj_persist(pop, t, sizeof(struct bpt));
     return 1;
 }
 
-int bpt_get(bpt_t *t, char *key, char *buffer) {
-    bpt_node_t *walk = t->root;
+int
+bpt_get(TOID(struct bpt) *t, char *key, char *buffer)
+{
+    const struct bpt *t_ptr = D_RO(*t);
+    const TOID(struct bpt_node) *walk = &t_ptr->root;
+
+    const struct bpt_node *walk_ptr = D_RO(*walk);
+    
     unsigned long long i = 0;
-    while(walk->type != LEAF) {
-        for (i = 0; i < walk->num_of_keys; i++) {
-            if (strcmp(walk->keys[i], key) > 0)
+    while(walk_ptr->type != LEAF) {
+        for (i = 0; i < walk_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&walk_ptr->keys[i]), key) > 0)
                 break;
         }
-        walk = walk->children[i];
+        walk = &walk_ptr->children[i];
+        walk_ptr = D_RO(*walk);
     }
 
-    for (i = 0; i < walk->num_of_keys; i++) {
-        if (strcmp(walk->keys[i], key) == 0) {
+    for (i = 0; i < walk_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&walk_ptr->keys[i]), key) == 0) {
             if (buffer != NULL) {
-                strcpy(buffer, walk->data[i]);
+                strcpy(buffer, str_get(&walk_ptr->data[i]));
             }
-            return strlen(walk->data[i]);
+            return D_RO(walk_ptr->data[i])->len;
         }
     }
     return -1;
 }
 
-int bpt_range(bpt_t *t, char *start, char *end, char **buffer) {
+// find leaf will find a leaf suitable for this key
+static TOID(struct bpt_node) *
+find_leaf(TOID(struct bpt) *t, char *key)
+{
+    struct bpt *t_ptr = D_RW(*t);
+    TOID(struct bpt_node) *root = &t_ptr->root;
+    struct bpt_node *root_ptr = D_RW(*root);
+
+    TOID(struct bpt_node) *walk;
+    struct bpt_node *walk_ptr = root_ptr;
+    unsigned long long i = 0;
+    while(walk_ptr->type != LEAF) {
+        for (i = 0; i < walk_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&walk_ptr->keys[i]), key) > 0)
+                break;
+        }
+        walk = &walk_ptr->children[i];
+        walk_ptr = D_RW(walk_ptr->children[i]);
+    }
+    return walk;
+}
+
+static TOID(struct bpt_node) *
+find_non_leaf(TOID(struct bpt)*t, char *key)
+{
+    struct bpt *t_ptr = D_RW(*t);
+    TOID(struct bpt_node) *root = &t_ptr->root;
+    struct bpt_node *root_ptr = D_RW(*root);
+
+    TOID(struct bpt_node) *walk = root;
+    struct bpt_node *walk_ptr = root_ptr;
+    unsigned long long i = 0;
+    while(walk_ptr->type != LEAF) {
+        for (i = 0; i < walk_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&walk_ptr->keys[i]), key) == 0) {
+                return walk;                
+            }
+
+            if (strcmp(str_get(&walk_ptr->keys[i]), key) > 0)
+                break;
+        }
+        walk = &walk_ptr->children[i];
+        walk_ptr = D_RW(walk_ptr->children[i]);
+    }
+    return NULL;
+}
+
+int
+bpt_range(TOID(struct bpt) *t, char *start, char *end, char **buffer)
+{
     if (strcmp(start, end) > 0)
         return -1;
+
+    const struct bpt *t_ptr = D_RO(*t);
     
-    bpt_node_t *leaf = find_leaf(t, start);
+    TOID(struct bpt_node) *leaf = find_leaf(t, start);
     unsigned long long i = 0, j = 0;
 
-    list_node_t *p = &leaf->link;
-    bpt_node_t *node;
-    while(p != t->list->head) {
-        node = (bpt_node_t *)p;
-        for (i = 0; i < node->num_of_keys; i++) {
-            if (strcmp(node->keys[i], end) > 0)
+    const TOID(struct list_node) *p = &D_RO(*leaf)->link;
+    const struct list_node *p_ptr = D_RO(*p);
+
+    TOID(struct bpt_node) *node;
+    const struct bpt_node *node_ptr;
+    while(!TOID_EQUALS(*p, D_RO(t_ptr->list)->head)) {
+        // notice that address of p is already the address of a leaf
+        // so do not used D_RO again
+        node = (TOID(struct bpt_node) *)p;
+        node_ptr = D_RO(*node);
+        for (i = 0; i < node_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&node_ptr->keys[i]), end) > 0)
                 return 1;
 
             // if (strcmp(node->keys[i], start) >= 0)
             //     printf("%s, ", node->data[i]);
 
-            if (strcmp(node->keys[i], start) >= 0)
-                strcpy(buffer[j++], node->keys[i]);
+            if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
+                strcpy(buffer[j++], str_get(&node_ptr->keys[i]));
         }
-        p = p->next;
+        p = &p_ptr->next;
+        p_ptr = D_RO(*p);
     }
     return -1;
 }
 
-int bpt_destroy(bpt_t *t) {
-    if (!t->root) {
+int
+bpt_destroy(TOID(struct bpt) *t)
+{
+
+    struct bpt *t_ptr = D_RW(*t);
+    
+    if (TOID_IS_NULL(t_ptr->root)) {
         printf("empty tree\n");
         return 1;
     }
-    bpt_node_t __walk__;
-    bpt_node_t *__walk = &__walk__;
-    bpt_node_t **walk = &__walk;
     
+
+    TOID(struct bpt_node) __walk__;
+    TOID(struct bpt_node) *walk = &__walk__;
+
+
+    TOID(struct bpt_node) *root = &t_ptr->root;
     queue_t *queue = new_queue();
-    enqueue(queue, t->root);
+    enqueue(queue, root);
 
     while(!queue_empty(queue)) {
         dequeue(queue, (void*)walk);
+        // walk is of TOID(struct bpt_node) * type
+        struct bpt_node *walk_ptr = D_RW(*walk);
         for (unsigned long long i = 0;
-             (*walk)->type == NON_LEAF && i < (*walk)->num_of_children; i++) {
-            enqueue(queue, (*walk)->children[i]);
+             walk_ptr->type == NON_LEAF && i < walk_ptr->num_of_children; i++) {
+            enqueue(queue, &walk_ptr->children[i]);
         }
 
-        if ((*walk)->type == LEAF) {
-            for (unsigned long long i = 0; i < (*walk)->num_of_keys; i++) { 
-                free((*walk)->keys[i]);
-                free((*walk)->data[i]);
+        if (walk_ptr->type == LEAF) {
+            for (unsigned long long i = 0; i < walk_ptr->num_of_keys; i++) { 
+                str_free(&walk_ptr->keys[i]);
+                str_free(&walk_ptr->data[i]);
             }
         }
-        free((*walk));
+        POBJ_FREE(walk);
     }
     queue_destroy(queue);
     return 1;
 }
 
-// find leaf will find a leaf suitable for this key
-static bpt_node_t *find_leaf(bpt_t * t, char *key) {
-    bpt_node_t *walk = t->root;
-    unsigned long long i = 0;
-    while(walk->type != LEAF) {
-        for (i = 0; i < walk->num_of_keys; i++) {
-            if (strcmp(walk->keys[i], key) > 0)
-                break;
-        }
-        walk = walk->children[i];
-    }
-    return walk;
-}
 
-static bpt_node_t *find_non_leaf(bpt_t *t, char *key) {
-    bpt_node_t *walk = t->root;
-    unsigned long long i = 0;
-    while(walk->type != LEAF) {
-        for (i = 0; i < walk->num_of_keys; i++) {
-            if (strcmp(walk->keys[i], key) == 0)
-                return walk;
-            if (strcmp(walk->keys[i], key) > 0)
-                break;
-        }
-        walk = walk->children[i];
-    }
-    return NULL;
-}
 
-int bpt_insert(bpt_t *t, char *key, char *value) {
-    bpt_node_t *old = find_leaf(t, key);
+int
+bpt_insert(PMEMobjpool *pop, TOID(struct bpt) *t, char *key, char *value)
+{
+    TOID(struct bpt_node) *old = find_leaf(t, key);
+    struct bpt_node *old_ptr = D_RW(*old);
 
-    for (unsigned long long i = 0; i < old->num_of_keys; i++) {
-        if (strcmp(old->keys[i], key) == 0) {
-            old = NULL;
+    for (unsigned long long i = 0; i < old_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&old_ptr->keys[i]), key) == 0) {
+            old_ptr = NULL;
             break;
         }
     }
 
-    if (!old)
+    if (!old_ptr)
         return 1;
     
-    t->nodes++;
-    
-    if (old->num_of_keys == DEGREE - 1) {
+    if (old_ptr->num_of_keys == DEGREE - 1) {
         // if you want to figure out what is actually going on
         // chekc out website below
         // https://www.cs.usfca.edu/~galles/visualization/BPlustree.html
         // this page indeed benefited me so much
-        bpt_complex_insert(t, old, key, value);
+        bpt_complex_insert(pop, t, old, key, value);
     } else {
-        bpt_simple_insert(old, key, value);
+        bpt_simple_insert(pop, old, key, value);
     }
     return 1;
 }
 
 // ensure leaf has no data at all before calling this function
-static void bpt_free_leaf(bpt_node_t *leaf) {
-    free(leaf);
+static void
+bpt_free_leaf(TOID(struct bpt_node) *leaf)
+{
+    POBJ_FREE(leaf);
 }
 
-static void bpt_free_non_leaf(bpt_node_t *nleaf) {
-    free(nleaf);
+static void
+bpt_free_non_leaf(TOID(struct bpt_node) *nleaf) {
+    POBJ_FREE(nleaf);
 }
 
-void bpt_print(bpt_t * t) {
-    if (!t->root) {
+void
+bpt_print(const TOID(struct bpt) * t)
+{
+    const struct bpt *t_ptr = D_RW(*t);
+    if (TOID_IS_NULL(t_ptr->root)) {
         printf("empty tree\n");
         return;
     }
-    bpt_node_t __walk__;
-    bpt_node_t *__walk = &__walk__;
-    bpt_node_t **walk = &__walk;
+    const TOID(struct bpt_node) __walk__;
+    const TOID(struct bpt_node) *walk = &__walk__;
     
     queue_t *queue = new_queue();
-    enqueue(queue, t->root);
+    enqueue(queue, &t_ptr->root);
 
     while(!queue_empty(queue)) {
         dequeue(queue, (void*)walk);
+        const struct bpt_node *walk_ptr = D_RO(*walk);
         for (unsigned long long i = 0;
-             (*walk)->type == NON_LEAF && i < (*walk)->num_of_children; i++) {
-            enqueue(queue, (*walk)->children[i]);
+             walk_ptr->type == NON_LEAF && i < walk_ptr->num_of_children; i++) {
+            enqueue(queue, &walk_ptr->children[i]);
         }
-        printf("%p child of %p: \n",*(walk), (*walk)->parent);
-        if ((*walk)->type == NON_LEAF)
+        printf("%p child of %p: \n",walk_ptr, D_RO(walk_ptr->parent));
+        if (walk_ptr->type == NON_LEAF)
             printf("non leaf: %llu children, %llu keys\n",
-                   (*walk)->num_of_children, (*walk)->num_of_keys);
+                   walk_ptr->num_of_children, walk_ptr->num_of_keys);
         printf("keys: \n");
-        for (unsigned long long i = 0; i < (*walk)->num_of_keys; i++) {
-            printf("%s, ", (*walk)->keys[i]);
+        for (unsigned long long i = 0; i < walk_ptr->num_of_keys; i++) {
+            printf("%s, ", str_get(&walk_ptr->keys[i]));
         }
         printf("\n\n");
     }
     queue_destroy(queue);
 }
 
-void bpt_print_leaves(bpt_t *t) {
-    list_node_t *p = t->list->head->next;
-    bpt_node_t *node;
-    while(p != t->list->head) {
-        node = (bpt_node_t *)p;
-        for (unsigned long long i = 0; i < node->num_of_keys; i++) {
-            printf("%s, ", node->keys[i]);
+void
+bpt_print_leaves(const TOID(struct bpt) *t)
+{
+    const struct bpt *t_ptr = D_RO(*t);
+    const TOID(struct list_node) *p = &D_RO(D_RO(t_ptr->list)->head)->next;
+    
+    const TOID(struct bpt_node) *node;
+    const struct bpt_node *node_ptr;
+    while(!TOID_EQUALS(*p, D_RO(t_ptr->list)->head)) {
+        node = (TOID(struct bpt_node) *)p;
+        node_ptr = D_RO(*node);
+        for (unsigned long long i = 0; i < node_ptr->num_of_keys; i++) {
+            printf("%s, ", str_get(&node_ptr->keys[i]));
         }
-        p = p->next;
+        p = &D_RO(*p)->next;
     }
     puts("");
 }
@@ -477,48 +680,62 @@ void bpt_print_leaves(bpt_t *t) {
      only DEGREE keys, the recursively remove
 */
 
-static bool bpt_is_root(bpt_node_t * t) {
-    return t->parent == NULL;
+static bool
+bpt_is_root(const TOID(struct bpt_node) *t)
+{
+    return TOID_IS_NULL(D_RO(*t)->parent);
 }
 
-static int bpt_remove_key_and_data(bpt_node_t *node, char *key) {
+static int
+bpt_remove_key_and_data(PMEMobjpool *pop, TOID(struct bpt_node) *node, char *key)
+{
+    struct bpt_node *node_ptr = D_RW(*node);
+    
     unsigned long long i = 0;
-    for (i = 0; i < node->num_of_keys; i++) {
-        if (strcmp(node->keys[i], key) == 0)
+    for (i = 0; i < node_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&node_ptr->keys[i]), key) == 0)
             break;
     }
 
-    for(; i < node->num_of_keys; i++) {
-        node->keys[i] = node->keys[i + 1];
-        node->data[i] = node->data[i + 1];
+    for(; i < node_ptr->num_of_keys; i++) {
+        node_ptr->keys[i] = node_ptr->keys[i + 1];
+        node_ptr->data[i] = node_ptr->data[i + 1];
     }
 
-    node->num_of_keys--;
-    free(node->keys[node->num_of_keys]);
-    free(node->data[node->num_of_keys]);
-    node->keys[node->num_of_keys] = NULL;
-    node->data[node->num_of_keys] = NULL;
+    node_ptr->num_of_keys--;
+    str_free(&node_ptr->keys[node_ptr->num_of_keys]);
+    str_free(&node_ptr->data[node_ptr->num_of_keys]);
+    node_ptr->keys[node_ptr->num_of_keys] = NULL_STR;
+    node_ptr->data[node_ptr->num_of_keys] = NULL_STR;
+    pmemobj_persist(pop, node, sizeof(struct bpt_node));
     return 1;
 }
 
-static bpt_node_t* bpt_check_redistribute(bpt_node_t *t) {
-    if (!t->parent)
+static const TOID(struct bpt_node) *
+bpt_check_redistribute(const TOID(struct bpt_node) *t)
+{
+    const struct bpt_node *t_ptr = D_RO(*t);
+    
+    if (TOID_IS_NULL(t_ptr->parent))
         return NULL;
 
-    bpt_node_t *parent = t->parent;
+    const TOID(struct bpt_node) *parent = &t_ptr->parent;
+    const struct bpt_node *parent_ptr = D_RO(*parent);
     unsigned long long i = 0;
-    for (i = 0; i < parent->num_of_children; i++) {
-        if (parent->children[i] == t)
+    for (i = 0; i < parent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(parent_ptr->children[i], *t))
             break;
     }
 
-    bpt_node_t *left = parent->children[(i == 0) ? 0 : i - 1];
-    bpt_node_t *right =
-        parent->children[(i == parent->num_of_children - 1) ? i : i + 1];
+    const TOID(struct bpt_node) *left
+        = &parent_ptr->children[(i == 0) ? 0 : i - 1];
+    
+    const TOID(struct bpt_node) *right =
+        &parent_ptr->children[(i == parent_ptr->num_of_children - 1) ? i : i + 1];
 
-    if (left->num_of_keys > DEGREE / 2)
+    if (D_RO(*left)->num_of_keys > DEGREE / 2)
         return left;
-    else if (right->num_of_keys > DEGREE / 2) {
+    else if (D_RO(*right)->num_of_keys > DEGREE / 2) {
         return right;
     }
     return NULL;
@@ -526,24 +743,34 @@ static bpt_node_t* bpt_check_redistribute(bpt_node_t *t) {
 
 
 // redistribute leaf nodes, not internal nodes
-static int redistribute_leaf(bpt_t *t, bpt_node_t *leaf, char *key) {
-    bpt_node_t *parent = leaf->parent;
-    bpt_node_t *non_leaf = find_non_leaf(t, key);
+static int
+redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *leaf, char *key)
+{
+    struct bpt_node *leaf_ptr = D_RW(*leaf);
+    
+    TOID(struct bpt_node) *parent = &leaf_ptr->parent;
+    TOID(struct bpt_node) *non_leaf = find_non_leaf(t, key);
+
+    struct bpt_node *parent_ptr = D_RW(*parent);
+    struct bpt_node *non_leaf_ptr;
     unsigned long long i = 0;
     unsigned long long idx_replace_key = 0;
     unsigned long long idx_child = 0;
-    char *replace_key = NULL;
+    TOID(struct string) *replace_key;
 
-    if (non_leaf) {
+    // no need to use TOIS_IS_NULL here
+    if (!non_leaf) {
+        non_leaf_ptr = D_RW(*non_leaf);
         for (idx_replace_key = 0;
-             idx_replace_key < non_leaf->num_of_keys; idx_replace_key++)
-        if (strcmp(non_leaf->keys[idx_replace_key], key) == 0)
-            break;            
+             idx_replace_key < non_leaf_ptr->num_of_keys; idx_replace_key++)
+            if (strcmp(str_get(&non_leaf_ptr->keys[idx_replace_key]), key) == 0)
+                break;            
     }
 
     
-    for (i = 0; i < parent->num_of_children; i++)
-        if (parent->children[i] == leaf){
+    for (i = 0; i < parent_ptr->num_of_children; i++)
+        if (TOID_EQUALS(parent_ptr->children[i], *leaf)) {
             idx_child = i;
             break;            
         }
@@ -551,253 +778,306 @@ static int redistribute_leaf(bpt_t *t, bpt_node_t *leaf, char *key) {
 
     unsigned long long idx_left = (i == 0) ? 0 : i - 1;
     unsigned long long idx_right =
-        (i == parent->num_of_children - 1) ? i : i + 1;
-    bpt_node_t *left = parent->children[idx_left];
-    bpt_node_t *right = parent->children[idx_right];
+        (i == parent_ptr->num_of_children - 1) ? i : i + 1;
+    TOID(struct bpt_node) *left = &parent_ptr->children[idx_left];
+    TOID(struct bpt_node) *right = &parent_ptr->children[idx_right];
+
+    struct bpt_node *left_ptr = D_RW(*left);
+    struct bpt_node *right_ptr = D_RW(*right);
  
-    if (left->num_of_keys > DEGREE / 2) {
-        unsigned long long tail = left->num_of_keys - 1;
-        parent->keys[idx_left] = left->keys[tail];
+    if (left_ptr->num_of_keys > DEGREE / 2) {
+        unsigned long long tail = left_ptr->num_of_keys - 1;
+        parent_ptr->keys[idx_left] = left_ptr->keys[tail];
         
-        for (i = 0; i < leaf->num_of_keys; i++) {
-            if (strcmp(leaf->keys[i], key) == 0) {
-                free(leaf->keys[i]);
-                free(leaf->data[i]);
+        for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&leaf_ptr->keys[i]), key) == 0) {
+                str_free(&leaf_ptr->keys[i]);
+                str_free(&leaf_ptr->data[i]);
                 for (; i > 0; i--) {
-                    leaf->keys[i] = leaf->keys[i-1];
-                    leaf->data[i] = leaf->data[i-1];
+                    leaf_ptr->keys[i] = leaf_ptr->keys[i-1];
+                    leaf_ptr->data[i] = leaf_ptr->data[i-1];
                 }
-                leaf->keys[0] = left->keys[tail];
-                leaf->data[0] = left->data[tail];
-                left->keys[tail] = NULL;
-                left->data[tail] = NULL;
-                left->num_of_keys--;
-                replace_key = leaf->keys[0];
+                leaf_ptr->keys[0] = left_ptr->keys[tail];
+                leaf_ptr->data[0] = left_ptr->data[tail];
+                left_ptr->keys[tail] = NULL_STR;
+                left_ptr->data[tail] = NULL_STR;
+                left_ptr->num_of_keys--;
+                replace_key = &leaf_ptr->keys[0];
+
+                pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
+                pmemobj_persist(pop, left, sizeof(struct bpt_node));
+                pmemobj_persist(pop, parent, sizeof(struct bpt_node));
                 break;
             }
-
         }
     }
-    else if (right->num_of_keys > DEGREE / 2) {
-        unsigned long long tail = leaf->num_of_keys - 1;
-        for (i = 0; i < leaf->num_of_keys; i++) {
-            if (strcmp(leaf->keys[i], key) == 0) {
-                free(leaf->keys[i]);
-                free(leaf->data[i]);
-                for (; i < leaf->num_of_keys - 1; i++) {
-                    leaf->keys[i] = leaf->keys[i+1];
-                    leaf->data[i] = leaf->data[i+1];
+    else if (right_ptr->num_of_keys > DEGREE / 2) {
+        unsigned long long tail = leaf_ptr->num_of_keys - 1;
+        for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&leaf_ptr->keys[i]), key) == 0) {
+                str_free(&leaf_ptr->keys[i]);
+                str_free(&leaf_ptr->data[i]);
+                for (; i < leaf_ptr->num_of_keys - 1; i++) {
+                    leaf_ptr->keys[i] = leaf_ptr->keys[i+1];
+                    leaf_ptr->data[i] = leaf_ptr->data[i+1];
                 }
-                leaf->keys[tail] = right->keys[0];
-                leaf->data[tail] = right->data[0];
+                leaf_ptr->keys[tail] = right_ptr->keys[0];
+                leaf_ptr->data[tail] = right_ptr->data[0];
 
-                for (unsigned long long j = 0; j < right->num_of_keys; j++) {
-                    right->keys[j] = right->keys[j+1];
-                    right->data[j] = right->data[j+1];
+                for (unsigned long long j = 0; j < right_ptr->num_of_keys; j++) {
+                    right_ptr->keys[j] = right_ptr->keys[j+1];
+                    right_ptr->data[j] = right_ptr->data[j+1];
                 }
-                parent->keys[idx_child] = right->keys[0];
-                right->num_of_keys--;
-                replace_key =  leaf->keys[0];
+                parent_ptr->keys[idx_child] = right_ptr->keys[0];
+                right_ptr->num_of_keys--;
+                replace_key = &leaf_ptr->keys[0];
+                pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
+                pmemobj_persist(pop, right, sizeof(struct bpt_node));
+                pmemobj_persist(pop, parent, sizeof(struct bpt_node));
                 break;
             }
-
         }
     }
 
+;
+    
     // if the key deleted reside in grandparent's keys, replace it
-    if (non_leaf)
-        non_leaf->keys[idx_replace_key] = replace_key;
+    if (!TOID_IS_NULL(*non_leaf)) {
+        str_write(pop,
+                  &non_leaf_ptr->keys[idx_replace_key], str_get(replace_key));
+    }
 
     return 1;
 }
 
-static int bpt_simple_delete(bpt_t *t, bpt_node_t *leaf, char *key) {
+static int
+bpt_simple_delete(PMEMobjpool *pop,
+                  TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key)
+{
 
     if (!bpt_is_root(leaf)) {
         // this branch will be executed only when deletin takes place on a
         // right subtree of a key
-        bpt_node_t *non_leaf = find_non_leaf(t, key);
+        TOID(struct bpt_node) *non_leaf = find_non_leaf(t, key);
+        struct bpt_node *non_leaf_ptr;
         unsigned long long i = 0;
-        if (non_leaf) {
-            for (i = 0; i < non_leaf->num_of_keys; i++)
-                if (strcmp(non_leaf->keys[i], key) == 0) {
+        // no need to use TOID_IS_NULL here
+        if (!non_leaf) {
+            non_leaf_ptr = D_RW(*non_leaf);
+            for (i = 0; i < non_leaf_ptr->num_of_keys; i++)
+                if (strcmp(str_get(&non_leaf_ptr->keys[i]), key) == 0) {
                     break;
                 }
         }
-        bpt_remove_key_and_data(leaf, key);
+        bpt_remove_key_and_data(pop, leaf, key);
         // replace the key
-        if (non_leaf)
-            non_leaf->keys[i] = leaf->keys[0];
+        if (!non_leaf)
+            str_write(pop,
+                      &non_leaf_ptr->keys[i], str_get(&non_leaf_ptr->keys[0]));
         return 1;
     } else
-        return bpt_remove_key_and_data(leaf, key);
+        return bpt_remove_key_and_data(pop, leaf, key);
 }
 
 
 
 // only used to merge leaves
-static bpt_node_t* merge_leaves(bpt_t *t, bpt_node_t *leaf, char *key) {
-    bpt_node_t *parent = leaf->parent;
+static TOID(struct bpt_node) *
+merge_leaves(PMEMobjpool *pop,
+             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key)
+{
+    struct bpt *t_ptr = D_RW(*t);
+    struct bpt_node *leaf_ptr = D_RW(*leaf);
+    
+    TOID(struct bpt_node) *parent = &leaf_ptr->parent;
+    struct bpt_node *parent_ptr = D_RW(*parent);
     unsigned long long i;
     unsigned long long idx_left;
     unsigned long long idx_right;
     // delete the key
-    for (i = 0; i < leaf->num_of_keys; i++) {
-        if (strcmp(leaf->keys[i], key) == 0)
+    for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&leaf_ptr->keys[i]), key) == 0)
             break;
     }
 
-    t->free_key = leaf->keys[i];
-    free(leaf->data[i]);
+    t_ptr->free_key = &leaf_ptr->keys[i];
+    str_free(&leaf_ptr->data[i]);
     
-    for (unsigned long long j = i; j <= leaf->num_of_keys - 1; j++) {
-        leaf->keys[j] = leaf->keys[j+1];
-        leaf->data[j] = leaf->data[j+1];
+    for (unsigned long long j = i; j <= leaf_ptr->num_of_keys - 1; j++) {
+        leaf_ptr->keys[j] = leaf_ptr->keys[j+1];
+        leaf_ptr->data[j] = leaf_ptr->data[j+1];
     }
-    leaf->num_of_keys--;
+    leaf_ptr->num_of_keys--;
 
     // find a proper sibling
-    for (i = 0; i < parent->num_of_children; i++) {
-        if (parent->children[i] == leaf)
+    for (i = 0; i < parent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(parent_ptr->children[i], *leaf))
             break;
     }
 
     idx_left = (i == 0) ? 0 : i - 1;
-    idx_right = (i == parent->num_of_children - 1) ? i : i + 1;
-    bpt_node_t *left = parent->children[idx_left];
-    bpt_node_t *right = parent->children[idx_right];
+    idx_right = (i == parent_ptr->num_of_children - 1) ? i : i + 1;
+    TOID(struct bpt_node) *left = &parent_ptr->children[idx_left];
+    TOID(struct bpt_node) *right = &parent_ptr->children[idx_right];
+
+    struct bpt_node *left_ptr = D_RW(*left);
+    struct bpt_node *right_ptr = D_RW(*right);
     unsigned long long delete_position = 0;
-    bpt_node_t *rev;
+    TOID(struct bpt_node) *rev;
     
     // merge left
-    if (i != 0 && left->num_of_keys <= DEGREE / 2) {
+    if (i != 0 && left_ptr->num_of_keys <= DEGREE / 2) {
         delete_position = i;
-        right = NULL;
+        right_ptr = NULL;
     } else {
         // merge to right
         delete_position = idx_right;
-        left = NULL;        
+        left_ptr = NULL;        
     }
 
     // merge
-    if (left) {
+    if (left_ptr) {
         // merge leaf into its left sibling
-        for (i = 0; i < leaf->num_of_keys; i++) {
-            left->keys[i + left->num_of_keys] = leaf->keys[i];
-            leaf->keys[i] = NULL;
-            left->data[i + left->num_of_keys] = leaf->data[i];
-            leaf->data[i] = NULL;
+        for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+            left_ptr->keys[i + left_ptr->num_of_keys] = leaf_ptr->keys[i];
+            leaf_ptr->keys[i] = NULL_STR;
+            left_ptr->data[i + left_ptr->num_of_keys] = leaf_ptr->data[i];
+            leaf_ptr->data[i] = NULL_STR;
         }
-        leaf->link.prev->next = leaf->link.next;
-        leaf->link.next->prev = leaf->link.prev;
-        left->num_of_keys += leaf->num_of_keys;
+        // leaf_ptr->link.prev_ptr->next = leaf_ptr->link.next;
+        // leaf_ptr->link.next_ptr->prev = leaf_ptr->link.prev;
+        list_remove(pop, &leaf_ptr->link);
+        left_ptr->num_of_keys += leaf_ptr->num_of_keys;
         bpt_free_leaf(leaf);
         rev = left;
     } else {
         // merge leaf into its right sibling
         // we merge right into leaf and modify the point in parent pointing
         // to right to point to leaf, so we may reduce some overhead
-        for (i = 0; i < right->num_of_keys; i++) {
-            leaf->keys[i + leaf->num_of_keys] = right->keys[i];
-            right->keys[i] = NULL;
-            leaf->data[i + leaf->num_of_keys] = right->data[i];
-            right->data[i] = NULL;
+        for (i = 0; i < right_ptr->num_of_keys; i++) {
+            leaf_ptr->keys[i + leaf_ptr->num_of_keys] = right_ptr->keys[i];
+            right_ptr->keys[i] = NULL_STR;
+            leaf_ptr->data[i + leaf_ptr->num_of_keys] = right_ptr->data[i];
+            right_ptr->data[i] = NULL_STR;
 
         }
-        right->link.prev->next = right->link.next;
-        right->link.next->prev =right->link.prev;
-        parent->children[idx_right] = leaf;
-        leaf->num_of_keys += right->num_of_keys;
+        // right->link.prev->next = right->link.next;
+        // right->link.next->prev =right->link.prev;
+        list_remove(pop, &right_ptr->link);
+        parent_ptr->children[idx_right] = *leaf;
+        leaf_ptr->num_of_keys += right_ptr->num_of_keys;
         bpt_free_leaf(right);
         rev = leaf;
     }
     
     // align children
-    for (unsigned long long j = delete_position; j <= parent->num_of_children - 1; j++) {
-        parent->children[j] = parent->children[j+1];
+    unsigned long long j;
+    for (j = delete_position; j <= parent_ptr->num_of_children - 1; j++) {
+        parent_ptr->children[j] = parent_ptr->children[j+1];
     }
-    parent->num_of_children--;
+    parent_ptr->num_of_children--;
     return rev;
 }
 
 
-static int bpt_insert_key(bpt_node_t *t, char *key) {
+static int
+bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, char *key) {
+    struct bpt_node *t_ptr = D_RW(*t);
     unsigned long long i = 0;
-    for (i = 0; i < t->num_of_keys; i++) {
-        if (strcmp(t->keys[i], key) == 0)
+    for (i = 0; i < t_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&t_ptr->keys[i]), key) == 0)
             return 1;
 
-        if (strcmp(t->keys[i], key) > 0)
+        if (strcmp(str_get(&t_ptr->keys[i]), key) > 0)
             break;
     }
 
-    for (unsigned long long j = t->num_of_keys; j > i; j--) {
-        t->keys[j] = t->keys[j-1];
+    for (unsigned long long j = t_ptr->num_of_keys; j > i; j--) {
+        t_ptr->keys[j] = t_ptr->keys[j-1];
     }
-    t->keys[i] = key;
-    t->num_of_keys++;
+    str_write(pop, &t_ptr->keys[i], key);
+    t_ptr->num_of_keys++;
     return 1;
 }
 
-static int redistribute_internal(char *split_key, bpt_node_t *node,
-                                 bpt_node_t *left, bpt_node_t *right) {
-    bpt_node_t *parent = node->parent;
+static int
+redistribute_internal(PMEMobjpool *pop, char *split_key,
+                      TOID(struct bpt_node) *node, TOID(struct bpt_node) *left,
+                      TOID(struct bpt_node) *right) {
+    struct bpt_node *node_ptr = D_RW(*node);
+    struct bpt_node *left_ptr = (left) ? D_RW(*left) : NULL;
+    struct bpt_node *right_ptr = (right) ? D_RW(*right) : NULL;
+    
+    TOID(struct bpt_node) *parent = &node_ptr->parent;
+    struct bpt_node *parent_ptr = D_RW(*parent);
     unsigned long long i = 0;
     unsigned long long j = 0;
     unsigned long long split = 0;
-    for (split = 0; split < parent->num_of_keys; split++) {
-        if (strcmp(parent->keys[split], split_key) == 0)
+    for (split = 0; split < parent_ptr->num_of_keys; split++) {
+        if (strcmp(str_get(&parent_ptr->keys[split]), split_key) == 0)
             break;
     }
 
-    for (i = 0; i < parent->num_of_children; i++) {
-        if (parent->children[i] == node)
+    for (i = 0; i < parent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(parent_ptr->children[i], *node))
             break;
     }
     
-    if (!left && right->num_of_keys > DEGREE / 2) {
-        node->keys[node->num_of_keys++] = split_key;    
-        node->children[node->num_of_children++] = right->children[0];
-        right->children[0]->parent = node;
-        parent->keys[split] = right->keys[0];
-        for (j = 0; j <= right->num_of_keys - 1; j++) {
-            right->keys[j] = right->keys[j+1];
-            right->children[j] = right->children[j+1];
+    if (!left_ptr && right_ptr->num_of_keys > DEGREE / 2) {
+        // borrow a key from right
+        str_write(pop, &node_ptr->keys[node_ptr->num_of_keys++], split_key);
+        node_ptr->children[node_ptr->num_of_children++] = right_ptr->children[0];
+        D_RW(right_ptr->children[0])->parent = *node;
+        parent_ptr->keys[split] = right_ptr->keys[0];
+        for (j = 0; j <= right_ptr->num_of_keys - 1; j++) {
+            right_ptr->keys[j] = right_ptr->keys[j+1];
+            right_ptr->children[j] = right_ptr->children[j+1];
         }
-        right->children[j] = NULL;
-        right->num_of_children--;
-        right->num_of_keys--;
-    } else if (!right && left->num_of_keys > DEGREE / 2) {
+        right_ptr->children[j] = NULL_BPT_NODE;
+        right_ptr->num_of_children--;
+        right_ptr->num_of_keys--;
+        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node, sizeof(struct bpt_node));
+        pmemobj_persist(pop, right, sizeof(struct bpt_node));
+        
+    } else if (!right_ptr && left_ptr->num_of_keys > DEGREE / 2) {
         // make some space
-        node->children[node->num_of_children] =
-            node->children[node->num_of_children-1];
-        for (j = node->num_of_keys; j > 0; j--) {
-            node->keys[j] = node->keys[j-1];
-            node->children[j] = node->children[j-1];
+        node_ptr->children[node_ptr->num_of_children] =
+            node_ptr->children[node_ptr->num_of_children-1];
+        for (j = node_ptr->num_of_keys; j > 0; j--) {
+            node_ptr->keys[j] = node_ptr->keys[j-1];
+            node_ptr->children[j] = node_ptr->children[j-1];
         }
-        node->keys[0] = split_key;
-        node->children[0] = left->children[left->num_of_children-1];
-        left->children[left->num_of_children-1]->parent = node;
-        parent->keys[split] = left->keys[left->num_of_keys-1];
-        left->keys[left->num_of_keys-1] = NULL;
-        left->children[left->num_of_children-1] = NULL;
-        node->num_of_keys++;
-        node->num_of_children++;
-        left->num_of_children--;
-        left->num_of_keys--;
-    } else if (left->num_of_keys > DEGREE/2 && right->num_of_keys > DEGREE/2) {
+        str_write(pop, &node_ptr->keys[0], split_key);
+        node_ptr->children[0] = left_ptr->children[left_ptr->num_of_children-1];
+        D_RW(left_ptr->children[left_ptr->num_of_children-1])->parent = *node;
+        parent_ptr->keys[split] = left_ptr->keys[left_ptr->num_of_keys-1];
+        left_ptr->keys[left_ptr->num_of_keys-1] = NULL_STR;
+        left_ptr->children[left_ptr->num_of_children-1] = NULL_BPT_NODE;
+        node_ptr->num_of_keys++;
+        node_ptr->num_of_children++;
+        left_ptr->num_of_children--;
+        left_ptr->num_of_keys--;
+        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node, sizeof(struct bpt_node));
+        pmemobj_persist(pop, left, sizeof(struct bpt_node));
+    } else if (left_ptr->num_of_keys > DEGREE/2 &&
+               right_ptr->num_of_keys > DEGREE/2) {
         // borrow from right
-        node->children[node->num_of_children++] = right->children[0];
-        right->children[0]->parent = node;
- node->keys[node->num_of_keys++] = split_key;
-        parent->keys[split] = right->keys[0];
-        for (j = 0; j <= right->num_of_keys - 1; j++) {
-            right->keys[j] = right->keys[j+1];
-            right->children[j] = right->children[j+1];
+        node_ptr->children[node_ptr->num_of_children++] = right_ptr->children[0];
+        D_RW(right_ptr->children[0])->parent = *node;
+        str_write(pop, &node_ptr->keys[node_ptr->num_of_keys++], split_key);
+        parent_ptr->keys[split] = right_ptr->keys[0];
+        for (j = 0; j <= right_ptr->num_of_keys - 1; j++) {
+            right_ptr->keys[j] = right_ptr->keys[j+1];
+            right_ptr->children[j] = right_ptr->children[j+1];
         }
-        right->children[j+1] = NULL;
-        right->num_of_children--;
-        right->num_of_keys--;
+        right_ptr->children[j+1] = NULL_BPT_NODE;
+        right_ptr->num_of_children--;
+        right_ptr->num_of_keys--;
+        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node, sizeof(struct bpt_node));
+        pmemobj_persist(pop, right, sizeof(struct bpt_node));
     } else {
         return -1;
     }
