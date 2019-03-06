@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include "list.h"
 #include "queue.h"
-#include "bplustree.h"
+#include "bplustree_dev.h"
 
 #define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
 
@@ -24,10 +24,11 @@ bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node);
 
 static int
 bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
-                   TOID(struct bpt_node) *leaf, char *key, char *value);
+                   TOID(struct bpt_node) *leaf, const char *key,
+                   const char *value);
 static int
-bpt_simple_insert(PMEMobjpool *pop,
-                  TOID(struct bpt_node) *leaf, char *key, char *value);
+bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
+                  const char *key, const char *value);
 static void
 bpt_insert_child(PMEMobjpool *pop,
                  TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);
@@ -37,47 +38,56 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
                   TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);
 
 static TOID(struct bpt_node) *
-find_leaf(TOID(struct bpt) *t, char *key);
+find_leaf(TOID(struct bpt) *t, const char *key);
 
 static TOID(struct bpt_node) *
-find_non_leaf(TOID(struct bpt) *t, char *key);
+find_non_leaf(TOID(struct bpt) *t, const char *key);
 
 // deletion
 static bool
 bpt_is_root(const TOID(struct bpt_node) *t);
 
 static int
-bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, char *key);
+bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, const char *key);
 
 static const TOID(struct bpt_node) *
 bpt_check_redistribute(const TOID(struct bpt_node) *t);
 
 static int
 redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
-                  TOID(struct bpt_node) *leaf, char *key);
+                  TOID(struct bpt_node) *leaf, const char *key);
 
 static int
-redistribute_internal(PMEMobjpool *pop, char *split_key,
+bpt_simple_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *leaf, const char *key);
+
+static int
+redistribute_internal(PMEMobjpool *pop, const char *split_key,
                       TOID(struct bpt_node) *parent, TOID(struct bpt_node) *left,
                       TOID(struct bpt_node) *right);
 
 static TOID(struct bpt_node) *
 merge_leaves(PMEMobjpool *pop,
-             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key);
+             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, const char *key);
+static int
+merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
+               TOID(struct bpt_node) *parent, const char *split_key);
 
 static int
-merge(bpt_t *t, bpt_node_t *parent, char *key, char *split_key);
+merge(PMEMobjpool *pop, TOID(struct bpt) *t,
+      TOID(struct bpt_node) *parent, const char *key, const char *split_key);
 
 static int
 bpt_remove_key_and_data(PMEMobjpool *pop,
-                        TOID(struct bpt_node) *node, char *key);
+                        TOID(struct bpt_node) *node, const char *key);
 
 static int
-bpt_complex_delete(bpt_t *t, bpt_node_t *leaf, char *key);
+bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
+                   TOID(struct bpt_node) *leaf, const char *key);
 
 static int
-bpt_simple_delete(PMEMobjpool *pop,
-                  TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key);
+bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
+                   TOID(struct bpt_node) *leaf, const char *key);
 
 static void
 bpt_free_leaf(TOID(struct bpt_node) *leaf);
@@ -90,26 +100,27 @@ int
 bpt_new(PMEMobjpool *pop, TOID(struct bpt) *t);
 
 int
-bpt_insert(PMEMobjpool *pop, TOID(struct bpt) *t, char *key, char *value);
+bpt_insert(PMEMobjpool *pop,
+           TOID(struct bpt) *t, const char *key, const char *value);
 
 int
-bpt_delete(bpt_t *t, char *key);
+bpt_delete(PMEMobjpool *pop, TOID(struct bpt) *t, const char *key);
 
 int
-bpt_get(TOID(struct bpt) *t, char *key, char *buffer);
+bpt_get(TOID(struct bpt) *t, const char *key, char *buffer);
 
 int
-bpt_range(TOID(struct bpt) *t, char *start, char *end, char **buffer);
+bpt_range(TOID(struct bpt) *t, const char *start, const char *end, char **buffer);
 
 int
 bpt_destroy(TOID(struct bpt) *t);
 
-int bpt_serialize_f(bpt_t *t, char *file_name);
-
-int bpt_serialize_fp(bpt_t *t, FILE *fp);
+// int bpt_serialize_f(bpt_t *t, char *file_name);
+// 
+// int bpt_serialize_fp(bpt_t *t, FILE *fp);
 
 void
-bpt_print(TOID(struct bpt) *t);
+bpt_print(const TOID(struct bpt) *t);
 
 void
 bpt_print_leaves(const TOID(struct bpt) *t);
@@ -142,13 +153,15 @@ bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
     *bpt_ptr->free_key = NULL_STR;
     bpt_ptr->level = 1;
 
-    pmemobj_persist(pop, bpt, sizeof(struct bpt));
+    pmemobj_persist(pop, bpt_ptr, sizeof(struct bpt));
     return 0;
 }
 
 int
 bpt_new (PMEMobjpool *pop, TOID(struct bpt) *t) {
-    return POBJ_NEW(pop, t, struct bpt, bpt_constr, NULL);
+    *t = POBJ_ROOT(pop, struct bpt);
+    bpt_constr(pop, t, NULL);
+    return 1;
 }
 
 static int
@@ -165,7 +178,7 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
         node_ptr->keys[i] = NULL_STR;
         node_ptr->data[i] = NULL_STR;        
     }
-    pmemobj_persist(pop, node, sizeof(struct bpt_node));
+    pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
     return 1;
 }
 
@@ -183,7 +196,7 @@ bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
         node_ptr->children[i] = NULL_BPT_NODE;
     }
     node_ptr->children[DEGREE] = NULL_BPT_NODE;
-    pmemobj_persist(pop, node, sizeof(struct bpt_node));
+    pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
     return 1;
 }
 
@@ -191,8 +204,8 @@ bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
 // we have to split the leaf and insert new node into parent node
 // adjustment to parent is necessary
 static int
-bpt_simple_insert(PMEMobjpool *pop,
-                  TOID(struct bpt_node) *leaf, char *key, char *value)
+bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
+                  const char *key, const char *value)
 {
     struct bpt_node *leaf_ptr = D_RW(*leaf);
     
@@ -212,7 +225,7 @@ bpt_simple_insert(PMEMobjpool *pop,
     str_write(pop, &leaf_ptr->keys[i], key);
     str_write(pop, &leaf_ptr->data[i], value);
     leaf_ptr->num_of_keys++;
-    pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
+    pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
     return 1;
 }
 
@@ -245,8 +258,8 @@ bpt_insert_child(PMEMobjpool *pop,
     parent_ptr->children[i] = *new;
     parent_ptr->num_of_children++;
     new_ptr->parent = old_ptr->parent;
-    pmemobj_persist(pop , old, sizeof(struct bpt_node));
-    pmemobj_persist(pop , new, sizeof(struct bpt_node));
+    pmemobj_persist(pop , old_ptr, sizeof(struct bpt_node));
+    pmemobj_persist(pop , new_ptr, sizeof(struct bpt_node));
  }
 
 static int
@@ -275,10 +288,10 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
         new_ptr->parent = new_parent;
 
         t_ptr->level++;
-        pmemobj_persist(pop, t, sizeof(struct bpt));
-        pmemobj_persist(pop, &new_parent, sizeof(struct bpt_node));
-        pmemobj_persist(pop, new, sizeof(struct bpt_node));
-        pmemobj_persist(pop, old, sizeof(struct bpt_node));
+        pmemobj_persist(pop, t_ptr, sizeof(struct bpt));
+        pmemobj_persist(pop, new_parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, new_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, old_ptr, sizeof(struct bpt_node));
         return 1;        
     }
     
@@ -309,9 +322,9 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
 
         old_ptr->parent = new_parent;
         new_ptr->parent = new_parent;
-        pmemobj_persist(pop, &new_parent, sizeof(struct bpt_node));
-        pmemobj_persist(pop, new, sizeof(struct bpt_node));
-        pmemobj_persist(pop, old, sizeof(struct bpt_node));
+        pmemobj_persist(pop, new_parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, new_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, old_ptr, sizeof(struct bpt_node));
         // num_of_children will not be modified
         // we modify this field in else if
         
@@ -370,8 +383,9 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
 // outter function has determined to call this function
 // so leaf->num_of_keys = DEGREE - 1
 static int
-bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
-                   TOID(struct bpt_node) *leaf, char *key, char *value)
+bpt_complex_insert(PMEMobjpool *pop,
+                   TOID(struct bpt) *t, TOID(struct bpt_node) *leaf,
+                   const char *key, const char *value)
 {
     TOID(struct bpt_node) new_leaf;
     bpt_new_leaf(pop, &new_leaf);
@@ -417,12 +431,12 @@ bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
     
     list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
     bpt_insert_adjust(pop, t, leaf, &new_leaf);
-    pmemobj_persist(pop, t, sizeof(struct bpt));
+    pmemobj_persist(pop, t_ptr, sizeof(struct bpt));
     return 1;
 }
 
 int
-bpt_get(TOID(struct bpt) *t, char *key, char *buffer)
+bpt_get(TOID(struct bpt) *t, const char *key, char *buffer)
 {
     const struct bpt *t_ptr = D_RO(*t);
     const TOID(struct bpt_node) *walk = &t_ptr->root;
@@ -452,7 +466,7 @@ bpt_get(TOID(struct bpt) *t, char *key, char *buffer)
 
 // find leaf will find a leaf suitable for this key
 static TOID(struct bpt_node) *
-find_leaf(TOID(struct bpt) *t, char *key)
+find_leaf(TOID(struct bpt) *t, const char *key)
 {
     struct bpt *t_ptr = D_RW(*t);
     TOID(struct bpt_node) *root = &t_ptr->root;
@@ -473,7 +487,7 @@ find_leaf(TOID(struct bpt) *t, char *key)
 }
 
 static TOID(struct bpt_node) *
-find_non_leaf(TOID(struct bpt)*t, char *key)
+find_non_leaf(TOID(struct bpt)*t, const char *key)
 {
     struct bpt *t_ptr = D_RW(*t);
     TOID(struct bpt_node) *root = &t_ptr->root;
@@ -498,7 +512,8 @@ find_non_leaf(TOID(struct bpt)*t, char *key)
 }
 
 int
-bpt_range(TOID(struct bpt) *t, char *start, char *end, char **buffer)
+bpt_range(TOID(struct bpt) *t,
+          const char *start, const char *end, char **buffer)
 {
     if (strcmp(start, end) > 0)
         return -1;
@@ -578,7 +593,8 @@ bpt_destroy(TOID(struct bpt) *t)
 
 
 int
-bpt_insert(PMEMobjpool *pop, TOID(struct bpt) *t, char *key, char *value)
+bpt_insert(PMEMobjpool *pop,
+           TOID(struct bpt) *t, const char *key, const char *value)
 {
     TOID(struct bpt_node) *old = find_leaf(t, key);
     struct bpt_node *old_ptr = D_RW(*old);
@@ -620,7 +636,7 @@ bpt_free_non_leaf(TOID(struct bpt_node) *nleaf) {
 void
 bpt_print(const TOID(struct bpt) * t)
 {
-    const struct bpt *t_ptr = D_RW(*t);
+    const struct bpt *t_ptr = D_RO(*t);
     if (TOID_IS_NULL(t_ptr->root)) {
         printf("empty tree\n");
         return;
@@ -687,7 +703,8 @@ bpt_is_root(const TOID(struct bpt_node) *t)
 }
 
 static int
-bpt_remove_key_and_data(PMEMobjpool *pop, TOID(struct bpt_node) *node, char *key)
+bpt_remove_key_and_data(PMEMobjpool *pop,
+                        TOID(struct bpt_node) *node, const char *key)
 {
     struct bpt_node *node_ptr = D_RW(*node);
     
@@ -707,7 +724,7 @@ bpt_remove_key_and_data(PMEMobjpool *pop, TOID(struct bpt_node) *node, char *key
     str_free(&node_ptr->data[node_ptr->num_of_keys]);
     node_ptr->keys[node_ptr->num_of_keys] = NULL_STR;
     node_ptr->data[node_ptr->num_of_keys] = NULL_STR;
-    pmemobj_persist(pop, node, sizeof(struct bpt_node));
+    pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
     return 1;
 }
 
@@ -745,7 +762,7 @@ bpt_check_redistribute(const TOID(struct bpt_node) *t)
 // redistribute leaf nodes, not internal nodes
 static int
 redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
-                  TOID(struct bpt_node) *leaf, char *key)
+                  TOID(struct bpt_node) *leaf, const char *key)
 {
     struct bpt_node *leaf_ptr = D_RW(*leaf);
     
@@ -804,9 +821,9 @@ redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
                 left_ptr->num_of_keys--;
                 replace_key = &leaf_ptr->keys[0];
 
-                pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
-                pmemobj_persist(pop, left, sizeof(struct bpt_node));
-                pmemobj_persist(pop, parent, sizeof(struct bpt_node));
+                pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
+                pmemobj_persist(pop, left_ptr, sizeof(struct bpt_node));
+                pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
                 break;
             }
         }
@@ -831,9 +848,9 @@ redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
                 parent_ptr->keys[idx_child] = right_ptr->keys[0];
                 right_ptr->num_of_keys--;
                 replace_key = &leaf_ptr->keys[0];
-                pmemobj_persist(pop, leaf, sizeof(struct bpt_node));
-                pmemobj_persist(pop, right, sizeof(struct bpt_node));
-                pmemobj_persist(pop, parent, sizeof(struct bpt_node));
+                pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
+                pmemobj_persist(pop, right_ptr, sizeof(struct bpt_node));
+                pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
                 break;
             }
         }
@@ -851,8 +868,8 @@ redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
 }
 
 static int
-bpt_simple_delete(PMEMobjpool *pop,
-                  TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key)
+bpt_simple_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
+                  TOID(struct bpt_node) *leaf, const char *key)
 {
 
     if (!bpt_is_root(leaf)) {
@@ -884,7 +901,7 @@ bpt_simple_delete(PMEMobjpool *pop,
 // only used to merge leaves
 static TOID(struct bpt_node) *
 merge_leaves(PMEMobjpool *pop,
-             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, char *key)
+             TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, const char *key)
 {
     struct bpt *t_ptr = D_RW(*t);
     struct bpt_node *leaf_ptr = D_RW(*leaf);
@@ -981,7 +998,7 @@ merge_leaves(PMEMobjpool *pop,
 
 
 static int
-bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, char *key) {
+bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, const char *key) {
     struct bpt_node *t_ptr = D_RW(*t);
     unsigned long long i = 0;
     for (i = 0; i < t_ptr->num_of_keys; i++) {
@@ -1001,7 +1018,7 @@ bpt_insert_key(PMEMobjpool *pop, TOID(struct bpt_node) *t, char *key) {
 }
 
 static int
-redistribute_internal(PMEMobjpool *pop, char *split_key,
+redistribute_internal(PMEMobjpool *pop, const char *split_key,
                       TOID(struct bpt_node) *node, TOID(struct bpt_node) *left,
                       TOID(struct bpt_node) *right) {
     struct bpt_node *node_ptr = D_RW(*node);
@@ -1036,9 +1053,9 @@ redistribute_internal(PMEMobjpool *pop, char *split_key,
         right_ptr->children[j] = NULL_BPT_NODE;
         right_ptr->num_of_children--;
         right_ptr->num_of_keys--;
-        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
-        pmemobj_persist(pop, node, sizeof(struct bpt_node));
-        pmemobj_persist(pop, right, sizeof(struct bpt_node));
+        pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, right_ptr, sizeof(struct bpt_node));
         
     } else if (!right_ptr && left_ptr->num_of_keys > DEGREE / 2) {
         // make some space
@@ -1058,9 +1075,9 @@ redistribute_internal(PMEMobjpool *pop, char *split_key,
         node_ptr->num_of_children++;
         left_ptr->num_of_children--;
         left_ptr->num_of_keys--;
-        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
-        pmemobj_persist(pop, node, sizeof(struct bpt_node));
-        pmemobj_persist(pop, left, sizeof(struct bpt_node));
+        pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, left_ptr, sizeof(struct bpt_node));
     } else if (left_ptr->num_of_keys > DEGREE/2 &&
                right_ptr->num_of_keys > DEGREE/2) {
         // borrow from right
@@ -1075,48 +1092,55 @@ redistribute_internal(PMEMobjpool *pop, char *split_key,
         right_ptr->children[j+1] = NULL_BPT_NODE;
         right_ptr->num_of_children--;
         right_ptr->num_of_keys--;
-        pmemobj_persist(pop, parent, sizeof(struct bpt_node));
-        pmemobj_persist(pop, node, sizeof(struct bpt_node));
-        pmemobj_persist(pop, right, sizeof(struct bpt_node));
+        pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, right_ptr, sizeof(struct bpt_node));
     } else {
         return -1;
     }
     return 1;
 }
 
-static int merge_internal(bpt_t *t, bpt_node_t *parent, char *split_key) {
+static int
+merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
+               TOID(struct bpt_node) *parent, const char *split_key)
+{
     // merge parent into a proper sibling, incorporating a split key from parent
     // of parent which seperate this parent and the sibling
     unsigned long long i = 0;
-    bpt_node_t *grandparent = parent->parent;
+    struct bpt_node * parent_ptr = D_RW(*parent);
+    TOID(struct bpt_node) *grandparent = &parent_ptr->parent;
+    struct bpt_node *gparent_ptr = D_RW(*grandparent);
 
 
     // merge this parent and its sibling
     unsigned long long idx_left = 0;
     unsigned long long idx_right = 0;
-    for (i = 0; i < grandparent->num_of_children; i++) {
-        if (grandparent->children[i] == parent)
+    for (i = 0; i < gparent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(gparent_ptr->children[i], *parent))
             break;
     }
 
     idx_left = (i == 0) ? 0 : i - 1;
-    idx_right = (i == grandparent->num_of_children - 1) ? i : i + 1;
-    bpt_node_t *left = grandparent->children[idx_left];
-    bpt_node_t *right = grandparent->children[idx_right];
-    bpt_node_t *merged = NULL;
+    idx_right = (i == gparent_ptr->num_of_children - 1) ? i : i + 1;
+    TOID(struct bpt_node) *left = &gparent_ptr->children[idx_left];
+    TOID(struct bpt_node) *right = &gparent_ptr->children[idx_right];
+    struct bpt_node *l_ptr = D_RW(*left);
+    struct bpt_node *r_ptr = D_RW(*right);
+    TOID(struct bpt_node) *merged = NULL;
     bool left_available = false;
     bool right_available = false;
     unsigned long long delete_position = i;
-    if (i == 0 || left->num_of_keys > DEGREE / 2) {
+    if (i == 0 || l_ptr->num_of_keys > DEGREE / 2) {
         delete_position = idx_right;
-        if (left->num_of_keys > DEGREE / 2)
+        if (l_ptr->num_of_keys > DEGREE / 2)
             left_available = true;
         left = NULL;
     }
 
-    if (i == grandparent->num_of_children-1 || right->num_of_keys > DEGREE/2) {
+    if (i == gparent_ptr->num_of_children-1 || r_ptr->num_of_keys > DEGREE/2) {
         delete_position = i;
-        if (right->num_of_keys > DEGREE / 2)
+        if (r_ptr->num_of_keys > DEGREE / 2)
             right_available = true;
         right = NULL;
     }
@@ -1127,131 +1151,145 @@ static int merge_internal(bpt_t *t, bpt_node_t *parent, char *split_key) {
     // and notice we have to change our split key
     if (!left && !right) {  // merge is impossible
         if (left_available) {
-            split_key = grandparent->keys[i-1];
-            redistribute_internal(split_key, parent,
-                                  grandparent->children[idx_left], NULL);
+            split_key = str_get(&gparent_ptr->keys[i-1]);
+            redistribute_internal(pop, split_key, parent,
+                                  &gparent_ptr->children[idx_left], NULL);
         }
         else {
-            split_key = grandparent->keys[i];
-            redistribute_internal(split_key, parent, NULL,
-                                  grandparent->children[idx_right]);
+            split_key = str_get(&gparent_ptr->keys[i]);
+            redistribute_internal(pop, split_key, parent, NULL,
+                                  &gparent_ptr->children[idx_right]);
         }
         return 1;
     }
 
     
     if (left) {
-        for (i = 0; i < parent->num_of_keys; i++) {
-            left->keys[i+left->num_of_keys] = parent->keys[i];
-            parent->keys[i] = NULL;
-            left->children[i+left->num_of_children] = parent->children[i];
-            parent->children[i]->parent = left;
-            parent->children[i] = NULL;
+        for (i = 0; i < parent_ptr->num_of_keys; i++) {
+            l_ptr->keys[i+l_ptr->num_of_keys] = parent_ptr->keys[i];
+            parent_ptr->keys[i] = NULL_STR;
+            l_ptr->children[i+l_ptr->num_of_children] = parent_ptr->children[i];
+            D_RW(parent_ptr->children[i])->parent = *left;
+            parent_ptr->children[i] = NULL_BPT_NODE;
         }
         
-        left->children[i+left->num_of_children] = parent->children[i];
-        parent->children[i]->parent = left;
-        parent->children[i] = NULL;
+        l_ptr->children[i+l_ptr->num_of_children] = parent_ptr->children[i];
+        D_RW(parent_ptr->children[i])->parent = *left;
+        parent_ptr->children[i] = NULL_BPT_NODE;
 
-        left->num_of_keys += parent->num_of_keys;
-        left->num_of_children += parent->num_of_children;
+        l_ptr->num_of_keys += parent_ptr->num_of_keys;
+        l_ptr->num_of_children += parent_ptr->num_of_children;
         
         bpt_free_non_leaf(parent);
-        bpt_insert_key(left, split_key);
+        bpt_insert_key(pop, left, split_key);
         merged = left;
+        pmemobj_persist(pop, l_ptr, sizeof(struct bpt_node));
     } else {
-        for (i = 0; i < right->num_of_keys; i++) {
-            parent->keys[i+parent->num_of_keys] = right->keys[i];
-            right->keys[i] = NULL;
-            parent->children[i+parent->num_of_children] = right->children[i];
-            right->children[i]->parent = parent;
-            right->children[i] = NULL;
+        for (i = 0; i < r_ptr->num_of_keys; i++) {
+            parent_ptr->keys[i+parent_ptr->num_of_keys] = r_ptr->keys[i];
+            r_ptr->keys[i] = NULL_STR;
+            parent_ptr->children[i+parent_ptr->num_of_children] = r_ptr->children[i];
+            D_RW(r_ptr->children[i])->parent = *parent;
+            r_ptr->children[i] = NULL_BPT_NODE;
         }
         
-        parent->children[i+parent->num_of_children] = right->children[i];
-        right->children[i]->parent = parent;
-        right->children[i] = NULL;
+        parent_ptr->children[i+parent_ptr->num_of_children] = r_ptr->children[i];
+        D_RW(r_ptr->children[i])->parent = *parent;
+        r_ptr->children[i] = NULL_BPT_NODE;
 
-        parent->num_of_keys += right->num_of_keys;
-        parent->num_of_children += right->num_of_children;
+        parent_ptr->num_of_keys += r_ptr->num_of_keys;
+        parent_ptr->num_of_children += r_ptr->num_of_children;
 
         bpt_free_non_leaf(right);
-        grandparent->children[idx_right] = parent;
-        bpt_insert_key(parent, split_key);
+        gparent_ptr->children[idx_right] = *parent;
+        bpt_insert_key(pop, parent, split_key);
         merged = parent;
+        pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
     }
 
-    if (bpt_is_root(grandparent) && grandparent->num_of_keys == 1) {
+    if (bpt_is_root(grandparent) && gparent_ptr->num_of_keys == 1) {
         bpt_free_non_leaf(grandparent);
-        t->root = merged;
-        merged->parent = NULL;
+        D_RW(*t)->root = *merged;
+        D_RW(*merged)->parent = NULL_BPT_NODE;
+        pmemobj_persist(pop, D_RW(*t), sizeof(struct bpt));
         return 1;
     }
 
     // align children
-    for (unsigned long long j = delete_position;
-         j <= grandparent->num_of_children - 1;
-         j++) {
-        grandparent->children[j] = grandparent->children[j+1];
+    unsigned long long j;
+    for ( j = delete_position; j <= gparent_ptr->num_of_children - 1; j++) {
+        gparent_ptr->children[j] = gparent_ptr->children[j+1];
     }
-    grandparent->num_of_children--;
+    gparent_ptr->num_of_children--;
+    pmemobj_persist(pop, gparent_ptr, sizeof(struct bpt_node));
     return 0;
 }
 
-static int merge(bpt_t *t, bpt_node_t *parent, char *key, char *split_key) {
+static int
+merge(PMEMobjpool *pop, TOID(struct bpt) *t,
+      TOID(struct bpt_node) *parent, const char *key, const char *split_key) {
     // remove the split key
+
+    struct bpt_node *parent_ptr = D_RW(*parent);
+    
     unsigned long long i = 0;
-    for (i = 0; i < parent->num_of_keys; i++) {
-        if (strcmp(parent->keys[i], split_key) == 0) {
+    for (i = 0; i < parent_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&parent_ptr->keys[i]), split_key) == 0) {
             unsigned long long j = 0;
-            for (j = i; j <= parent->num_of_keys - 1; j++) {
-                parent->keys[j] = parent->keys[j+1];
+            for (j = i; j <= parent_ptr->num_of_keys - 1; j++) {
+                parent_ptr->keys[j] = parent_ptr->keys[j+1];
             }
             break;
         }
     }
+
+    pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
     // parent has enough keys
-    parent->num_of_keys--;
-    unsigned long long num_of_keys = parent->num_of_keys;
+    parent_ptr->num_of_keys--;
+    unsigned long long num_of_keys = parent_ptr->num_of_keys;
 
     if (num_of_keys >= DEGREE / 2 || (bpt_is_root(parent) && num_of_keys >= 1))
         return 1;
 
     if (bpt_is_root(parent) && num_of_keys == 0) {
-        t->root = parent->children[0];
-        parent->children[0]->parent = NULL;
+        D_RW(*t)->root = parent_ptr->children[0];
+        D_RW(parent_ptr->children[0])->parent = NULL_BPT_NODE;
         bpt_free_non_leaf(parent);
+        pmemobj_persist(pop, D_RW(*t), sizeof(struct bpt));
         return 1;
     }
     // now we have to find a split key for parent
 
-    bpt_node_t *grandparent = parent->parent;
+    TOID(struct bpt_node) *grandparent = &parent_ptr->parent;
+    struct bpt_node *gparent_ptr = D_RW(*grandparent);
 
-    for (i = 0; i < grandparent->num_of_children; i++) {
-        if (grandparent->children[i] == parent)
+    for (i = 0; i < gparent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(gparent_ptr->children[i], *parent))
             break;
     }
 
     unsigned long long idx_left = (i == 0) ? 0 : i - 1;
     unsigned long long idx_right =
-        (i == grandparent->num_of_children - 1) ? i : i + 1;
+        (i == gparent_ptr->num_of_children - 1) ? i : i + 1;
     unsigned long long split = i-1; // merge to left
-    bpt_node_t *left = grandparent->children[idx_left];
-    bpt_node_t *right = grandparent->children[idx_right];
-    if (i == 0 || left->num_of_keys > DEGREE / 2) {
+    TOID(struct bpt_node) *left = &gparent_ptr->children[idx_left];
+    TOID(struct bpt_node) *right = &gparent_ptr->children[idx_right];
+    struct bpt_node *l_ptr = D_RW(*left);
+    struct bpt_node *r_ptr = D_RW(*right);
+    if (i == 0 || l_ptr->num_of_keys > DEGREE / 2) {
         split = i;
     }
 
-    if (i == grandparent->num_of_children-1 || right->num_of_keys > DEGREE/2) {
+    if (i == gparent_ptr->num_of_children-1 || r_ptr->num_of_keys > DEGREE/2) {
         split = i -1;
     }
 
-    split_key = grandparent->keys[split];
+    split_key = str_get(&gparent_ptr->keys[split]);
 
     // 1 means everything is done, no more recursion
-    if (merge_internal(t, parent, split_key) == 1)
+    if (merge_internal(pop, t, parent, split_key) == 1)
         return 1;
-    merge(t, grandparent, key, split_key);
+    merge(pop, t, grandparent, key, split_key);
     return 1;
 }
 
@@ -1270,67 +1308,77 @@ static int merge(bpt_t *t, bpt_node_t *parent, char *key, char *split_key) {
          just remove the key and delete this root. Delegate root to the newly
          merged node
  */
-static int bpt_complex_delete(bpt_t *t, bpt_node_t *leaf, char *key) {
+static int
+bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
+                   TOID(struct bpt_node) *leaf, const char *key)
+{
     // find internal node which contains the keys to be deleted
-    bpt_node_t *non_leaf = find_non_leaf(t, key);
+    TOID(struct bpt_node) *non_leaf = find_non_leaf(t, key);
     
     // find split key
-    bpt_node_t *parent = leaf->parent; // impossible to be NULL
+    struct bpt_node *leaf_ptr = D_RW(*leaf);
+    TOID(struct bpt_node) *parent = &leaf_ptr->parent; // impossible to be NULL
+    struct bpt_node *parent_ptr = D_RW(*parent);
     unsigned long long i = 0;
-    for (i = 0; i < parent->num_of_children; i++) {
-        if (parent->children[i] == leaf)
+    for (i = 0; i < parent_ptr->num_of_children; i++) {
+        if (TOID_EQUALS(parent_ptr->children[i], *leaf))
             break;
     }
     unsigned long long split = (i == 0) ? 0 : i - 1;
 
 
     // merge
-    bpt_node_t *merged = merge_leaves(t, leaf, key);
+    TOID(struct bpt_node) *merged = merge_leaves(pop, t, leaf, key);
     
     // replace the key
-    char *replace_key = merged->keys[0];
+    const char *replace_key = str_get(&(D_RW(*merged)->keys[0]));
     if (non_leaf) {
-        for (unsigned long long j = 0; j < non_leaf->num_of_keys; j++)
-            if (strcmp(non_leaf->keys[j], key) == 0) {
-                non_leaf->keys[j] = replace_key;
+        struct bpt_node *non_leaf_ptr = D_RW(*non_leaf);
+        for (unsigned long long j = 0; j < non_leaf_ptr->num_of_keys; j++)
+            if (strcmp(str_get(&non_leaf_ptr->keys[j]), key) == 0) {
+                str_write(pop, &non_leaf_ptr->keys[j], replace_key);
                 break;
             }
     }
-    char *split_key = parent->keys[split];
-    merge(t, parent, key, split_key);
-    free(t->free_key);
-    t->free_key = NULL;
+    const char *split_key = str_get(&parent_ptr->keys[split]);
+    merge(pop, t, parent, key, split_key);
+    str_free(D_RW(*t)->free_key);
+    *D_RW(*t)->free_key = NULL_STR;
     return 1;
 }
 
-int bpt_delete(bpt_t *t, char *key) {
-    if (!t->root)
+int
+bpt_delete(PMEMobjpool *pop, TOID(struct bpt) *t, const char *key)
+{
+    if (TOID_IS_NULL(D_RO(*t)->root))
         return 1;
     unsigned long long  i = 0; 
-    bpt_node_t *leaf = find_leaf(t, key);
-    for (i = 0; i < leaf->num_of_keys; i++) {
-        if (strcmp(leaf->keys[i], key) == 0)
+    TOID(struct bpt_node) *leaf = find_leaf(t, key);
+    struct bpt_node *leaf_ptr = D_RW(*leaf);
+    for (i = 0; i < leaf_ptr->num_of_keys; i++) {
+        if (strcmp(str_get(&leaf_ptr->keys[i]), key) == 0)
             break;
     }
 
-    if (i == leaf->num_of_keys)
+    if (i == leaf_ptr->num_of_keys)
         return 1;
     
-    bpt_node_t *parent = leaf->parent;
-    if (leaf->num_of_keys > DEGREE / 2 || bpt_is_root(leaf)) {
-        bpt_simple_delete(t, leaf, key);
+    TOID(struct bpt_node) *parent = &leaf_ptr->parent;
+        
+    if (leaf_ptr->num_of_keys > DEGREE / 2 || bpt_is_root(leaf)) {
+        bpt_simple_delete(pop, t, leaf, key);
 
         // tree is destroyed
-        if (leaf->num_of_keys == 0) {
+        if (leaf_ptr->num_of_keys == 0) {
             bpt_free_leaf(leaf);
-            t->root = NULL;
+            D_RW(*t)->root = NULL_BPT_NODE;
         }
-
         // index key should be replaced it is resides in parent's key list
-        if (parent) {
-            for (i = 0; i < parent->num_of_keys; i++) {
-                if (strcmp(parent->keys[i], key) == 0) {
-                    parent->keys[i] = leaf->keys[0];
+        if (!TOID_IS_NULL(*parent)) {
+            struct bpt_node *parent_ptr = D_RW(*parent);
+            for (i = 0; i < parent_ptr->num_of_keys; i++) {
+                if (strcmp(str_get(&parent_ptr->keys[i]), key) == 0) {
+                    parent_ptr->keys[i] = leaf_ptr->keys[0];
                     return 1;
                 }
             }
@@ -1339,11 +1387,11 @@ int bpt_delete(bpt_t *t, char *key) {
         // if one of leaf's nearest siblings has enough keys to share
         // borrow a key from this sibling
         if (bpt_check_redistribute(leaf))
-            return redistribute_leaf(t, leaf, key);
+            return redistribute_leaf(pop, t, leaf, key);
         else
             // no sibling can offer us a key
             // merge is required
-            return bpt_complex_delete(t, leaf, key);
+            return bpt_complex_delete(pop, t, leaf, key);
     }
     return 1;
 }
