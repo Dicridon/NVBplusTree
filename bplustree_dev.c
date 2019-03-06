@@ -13,7 +13,7 @@
 #include "queue.h"
 #include "bplustree_dev.h"
 
-#define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
+
 
 // insertion
 static int
@@ -27,8 +27,10 @@ bpt_complex_insert(PMEMobjpool *pop, TOID(struct bpt) *t,
                    TOID(struct bpt_node) *leaf, const char *key,
                    const char *value);
 static int
-bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
+bpt_simple_insert(PMEMobjpool *pop,
+                  TOID(struct bpt_node) *leaf,
                   const char *key, const char *value);
+
 static void
 bpt_insert_child(PMEMobjpool *pop,
                  TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);

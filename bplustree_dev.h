@@ -9,10 +9,14 @@
 
 #define DEGREE (128)
 #define MIN_ENTRIES (DEGREE)
+#define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
+
 POBJ_LAYOUT_BEGIN(bptree);
 POBJ_LAYOUT_ROOT(bptree, struct bpt);
 POBJ_LAYOUT_TOID(bptree, struct bpt_node);
 POBJ_LAYOUT_END(bptree);
+
+
 
 
 enum bpt_node_type {

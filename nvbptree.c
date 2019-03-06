@@ -1,4 +1,5 @@
 #include "nvbptree.h"
+
 int nv_bpt_new(PMEMobjpool *pop, nv_bpt_t *t)
 {
     return bpt_new(pop, t->t);
