@@ -1,4 +1,4 @@
-/*
+ /*
   !!!!!!!!!!!!!!
   !!!! NOTE: I ALWAYS ASSUME THAT MALLOC/REALLOC/CALLOC WOULD NOT FAIL!!!!!!
   !!!!       THIS IS JUST FOR TEST
@@ -12,7 +12,8 @@
 #include "list.h"
 #include "queue.h"
 #include "bplustree_dev.h"
-
+#include "en_debug.h"
+#include "debug.h"
 
 
 // insertion
@@ -38,7 +39,6 @@ bpt_insert_child(PMEMobjpool *pop,
 static int
 bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
                   TOID(struct bpt_node) *old, TOID(struct bpt_node) *new);
-
 static TOID(struct bpt_node) *
 find_leaf(TOID(struct bpt) *t, const char *key);
 
@@ -130,57 +130,82 @@ bpt_print_leaves(const TOID(struct bpt) *t);
 static int
 bpt_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
 {
-    if (arg)
+    DEBUG_ENT();
+    if (arg) {
+        DEBUG_MESG("non empty args\n");
+        DEBUG_LEA();
         return -1;
-    TOID(struct bpt_node) *node = ptr;
-    struct bpt_node *node_ptr = D_RW(*node);
+    }
+
+    struct bpt_node *node_ptr = ptr;
     list_new_node(pop, &node_ptr->link);
+    DEBUG_LEA();
     return 0;
 }
 
 static int
 bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
 {
-    if (arg)
+    DEBUG_ENT();
+    if (arg) {
+        DEBUG_MESG("non empty args\n");
+        DEBUG_LEA();
         return -1;
-    TOID(struct bpt) *bpt = ptr;
-    struct bpt *bpt_ptr = D_RW(*bpt);
+    }
+
+    struct bpt *bpt_ptr = ptr;
 
     bpt_new_leaf(pop, &bpt_ptr->root);
     struct bpt_node *root_ptr = D_RW(bpt_ptr->root);
     
     list_new(pop, &bpt_ptr->list);
-    list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
 
-    *bpt_ptr->free_key = NULL_STR;
+    bpt_ptr->free_key = NULL;
     bpt_ptr->level = 1;
 
     pmemobj_persist(pop, bpt_ptr, sizeof(struct bpt));
+    DEBUG_LEA();
     return 0;
 }
 
 int
 bpt_new (PMEMobjpool *pop, TOID(struct bpt) *t) {
+    DEBUG_ENT();
     *t = POBJ_ROOT(pop, struct bpt);
-    bpt_constr(pop, t, NULL);
+    DEBUG_MESG("After POBJ_ROOT: \n"
+               "address: %p, pool_uuid_lo: %ld, offer: %ld\n",
+               D_RO(*t), t->oid.pool_uuid_lo, t->oid.off);
+    struct bpt *t_ptr = D_RW(*t);
+    bpt_constr(pop, t_ptr, NULL);
+    DEBUG_MESG("After bpt_constr: \n"
+               "address: %p, pool_uuid_lo: %ld, offer: %ld\n",
+               D_RO(*t), t->oid.pool_uuid_lo, t->oid.off);
+    DEBUG_LEA();
     return 1;
 }
 
 static int
 bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
 {
+    DEBUG_ENT();
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
     struct bpt_node *node_ptr = D_RW(*node);
 
     // filed link is not initialized here, because interfaces in list.c
     // will handle the initialization
+    node_ptr->num_of_children = 0;
+    node_ptr->num_of_keys = 0;
     node_ptr->parent = NULL_BPT_NODE;
     node_ptr->type = LEAF;
+    list_new_node(pop, &node_ptr->link);
+    D_RW(node_ptr->link)->prev = node_ptr->link;
+    D_RW(node_ptr->link)->next = node_ptr->link;
     for (int i = 0; i < DEGREE; i++) {
         node_ptr->keys[i] = NULL_STR;
         node_ptr->data[i] = NULL_STR;        
     }
     pmemobj_persist(pop, node_ptr, sizeof(struct bpt_node));
+    DEBUG_LEA();
     return 1;
 }
 
@@ -191,8 +216,13 @@ bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
 
     // filed link is not initialized here, because interfaces in list.c
     // will handle the initialization
+    node_ptr->num_of_children = 0;
+    node_ptr->num_of_keys = 0;
     node_ptr->parent = NULL_BPT_NODE;
     node_ptr->type = NON_LEAF;
+    list_new_node(pop, &node_ptr->link);
+    D_RW(node_ptr->link)->prev = node_ptr->link;
+    D_RW(node_ptr->link)->next = node_ptr->link;
     for (int i = 0; i < DEGREE; i++) {
         node_ptr->keys[i] = NULL_STR;
         node_ptr->children[i] = NULL_BPT_NODE;
@@ -209,8 +239,11 @@ static int
 bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
                   const char *key, const char *value)
 {
+    DEBUG_ENT();
     struct bpt_node *leaf_ptr = D_RW(*leaf);
-    
+
+    DEBUG_MESG("inserting target: %ld, %ld",
+               leaf->oid.pool_uuid_lo, leaf->oid.off);
     
     unsigned long long i;
     for (i = 0; i < leaf_ptr->num_of_keys; i++) {
@@ -228,6 +261,7 @@ bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
     str_write(pop, &leaf_ptr->data[i], value);
     leaf_ptr->num_of_keys++;
     pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
+    DEBUG_LEA();
     return 1;
 }
 
@@ -235,6 +269,7 @@ static void
 bpt_insert_child(PMEMobjpool *pop,
                  TOID(struct bpt_node) *old, TOID(struct bpt_node) *new)
 {
+    DEBUG_ENT();
     struct bpt_node *old_ptr = D_RW(*old);
     struct bpt_node *new_ptr = D_RW(*new);
     struct bpt_node *parent_ptr = D_RW(old_ptr->parent);
@@ -262,16 +297,18 @@ bpt_insert_child(PMEMobjpool *pop,
     new_ptr->parent = old_ptr->parent;
     pmemobj_persist(pop , old_ptr, sizeof(struct bpt_node));
     pmemobj_persist(pop , new_ptr, sizeof(struct bpt_node));
+    DEBUG_LEA();
  }
 
 static int
 bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
                   TOID(struct bpt_node) *old, TOID(struct bpt_node) *new)
 {
+    DEBUG_ENT();
     struct bpt *t_ptr = D_RW(*t);
     struct bpt_node *old_ptr = D_RW(*old);
     struct bpt_node *new_ptr = D_RW(*new);
-    TOID(struct bpt_node) *parent = &old_ptr->parent;
+    TOID(struct bpt_node) parent = old_ptr->parent;
     struct bpt_node *parent_ptr = D_RW(old_ptr->parent);
     
     if (t_ptr->level == 1) {
@@ -294,10 +331,11 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
         pmemobj_persist(pop, new_parent_ptr, sizeof(struct bpt_node));
         pmemobj_persist(pop, new_ptr, sizeof(struct bpt_node));
         pmemobj_persist(pop, old_ptr, sizeof(struct bpt_node));
+        DEBUG_LEA();
         return 1;        
     }
     
-    if (!TOID_IS_NULL(old_ptr->parent)) {
+    if (TOID_IS_NULL(old_ptr->parent)) {
         // this is internal node split
         // we may not just create a new root and link old and new to it
         // we must pick out the smallest child in new and use this child
@@ -317,7 +355,7 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
 
         // delete the key copied to root in new
         for (unsigned long long i = 1; i < new_ptr->num_of_keys; i++) {
-            TOID_EQUALS(new_ptr->keys[i-1], new_ptr->keys[i]);
+            new_ptr->keys[i-1] = new_ptr->keys[i];
         }
         new_ptr->keys[new_ptr->num_of_keys - 1] = NULL_STR;
         new_ptr->num_of_keys--;
@@ -355,7 +393,9 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
             new_parent_ptr->keys[i] = parent_ptr->keys[i + split];
             parent_ptr->keys[i + split] = NULL_STR;
             new_parent_ptr->children[i] = parent_ptr->children[i + split + 1];
-            D_RW(new_parent_ptr->children[i])->parent = new_parent;
+            struct bpt_node *childre_ptr = D_RW(new_parent_ptr->children[i]);
+            // D_RW(new_parent_ptr->children[i])->parent = new_parent;
+            childre_ptr->parent = new_parent;
             parent_ptr->children[i + split + 1] = NULL_BPT_NODE;
         }
 
@@ -366,7 +406,7 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
 
         
         // recursive handling
-        bpt_insert_adjust(pop, t, parent, &new_parent);
+        bpt_insert_adjust(pop, t, &parent, &new_parent);
     } else {
         bpt_insert_child(pop, old, new);
         if (new_ptr->type == NON_LEAF) {
@@ -378,6 +418,7 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
             new_ptr->num_of_keys--;
         }
     }
+    DEBUG_LEA();
     return 1;
 }
 
@@ -389,6 +430,7 @@ bpt_complex_insert(PMEMobjpool *pop,
                    TOID(struct bpt) *t, TOID(struct bpt_node) *leaf,
                    const char *key, const char *value)
 {
+    DEBUG_ENT();
     TOID(struct bpt_node) new_leaf;
     bpt_new_leaf(pop, &new_leaf);
 
@@ -412,7 +454,7 @@ bpt_complex_insert(PMEMobjpool *pop,
     }
 
     str_new(pop, &leaf_ptr->keys[i], key);
-    str_new(pop, &leaf_ptr->keys[i], value);
+    str_new(pop, &leaf_ptr->data[i], value);
 
     leaf_ptr->num_of_keys++;
     
@@ -434,6 +476,7 @@ bpt_complex_insert(PMEMobjpool *pop,
     list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
     bpt_insert_adjust(pop, t, leaf, &new_leaf);
     pmemobj_persist(pop, t_ptr, sizeof(struct bpt));
+    DEBUG_LEA();
     return 1;
 }
 
@@ -460,7 +503,7 @@ bpt_get(TOID(struct bpt) *t, const char *key, char *buffer)
             if (buffer != NULL) {
                 strcpy(buffer, str_get(&walk_ptr->data[i]));
             }
-            return D_RO(walk_ptr->data[i])->len;
+            return D_RO(walk_ptr->data[i])->len.l;
         }
     }
     return -1;
@@ -470,11 +513,12 @@ bpt_get(TOID(struct bpt) *t, const char *key, char *buffer)
 static TOID(struct bpt_node) *
 find_leaf(TOID(struct bpt) *t, const char *key)
 {
+    DEBUG_ENT();
     struct bpt *t_ptr = D_RW(*t);
     TOID(struct bpt_node) *root = &t_ptr->root;
     struct bpt_node *root_ptr = D_RW(*root);
 
-    TOID(struct bpt_node) *walk;
+    TOID(struct bpt_node) *walk = root;
     struct bpt_node *walk_ptr = root_ptr;
     unsigned long long i = 0;
     while(walk_ptr->type != LEAF) {
@@ -485,12 +529,14 @@ find_leaf(TOID(struct bpt) *t, const char *key)
         walk = &walk_ptr->children[i];
         walk_ptr = D_RW(walk_ptr->children[i]);
     }
+    DEBUG_LEA();
     return walk;
 }
 
 static TOID(struct bpt_node) *
 find_non_leaf(TOID(struct bpt)*t, const char *key)
 {
+    DEBUG_ENT();
     struct bpt *t_ptr = D_RW(*t);
     TOID(struct bpt_node) *root = &t_ptr->root;
     struct bpt_node *root_ptr = D_RW(*root);
@@ -510,6 +556,7 @@ find_non_leaf(TOID(struct bpt)*t, const char *key)
         walk = &walk_ptr->children[i];
         walk_ptr = D_RW(walk_ptr->children[i]);
     }
+    DEBUG_ENT();
     return NULL;
 }
 
@@ -598,6 +645,7 @@ int
 bpt_insert(PMEMobjpool *pop,
            TOID(struct bpt) *t, const char *key, const char *value)
 {
+    DEBUG_ENT();
     TOID(struct bpt_node) *old = find_leaf(t, key);
     struct bpt_node *old_ptr = D_RW(*old);
 
@@ -608,8 +656,11 @@ bpt_insert(PMEMobjpool *pop,
         }
     }
 
-    if (!old_ptr)
-        return 1;
+    if (!old_ptr) {
+        DEBUG_LEA();
+        return 1;        
+    }
+
     
     if (old_ptr->num_of_keys == DEGREE - 1) {
         // if you want to figure out what is actually going on
@@ -620,6 +671,7 @@ bpt_insert(PMEMobjpool *pop,
     } else {
         bpt_simple_insert(pop, old, key, value);
     }
+    DEBUG_LEA();
     return 1;
 }
 
@@ -650,7 +702,7 @@ bpt_print(const TOID(struct bpt) * t)
     enqueue(queue, &t_ptr->root);
 
     while(!queue_empty(queue)) {
-        dequeue(queue, (void*)walk);
+        dequeue(queue, (void*)&walk);
         const struct bpt_node *walk_ptr = D_RO(*walk);
         for (unsigned long long i = 0;
              walk_ptr->type == NON_LEAF && i < walk_ptr->num_of_children; i++) {
@@ -1345,7 +1397,7 @@ bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
     const char *split_key = str_get(&parent_ptr->keys[split]);
     merge(pop, t, parent, key, split_key);
     str_free(D_RW(*t)->free_key);
-    *D_RW(*t)->free_key = NULL_STR;
+    D_RW(*t)->free_key = NULL;
     return 1;
 }
 

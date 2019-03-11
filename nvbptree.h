@@ -4,7 +4,7 @@
 #include "bplustree_dev.h"
 
 typedef struct {
-    TOID(struct bpt) *t;
+    TOID(struct bpt) t;
 } nv_bpt_t;
 
 int
@@ -26,4 +26,10 @@ nv_bpt_range(nv_bpt_t *t, const char *start, const char *end, char **buffer);
 
 int
 nv_bpt_destroy(nv_bpt_t *t);
+
+void
+nv_bpt_print(nv_bpt_t *t);
+
+void
+nv_bpt_print_leaves(nv_bpt_t *t);
 #endif
