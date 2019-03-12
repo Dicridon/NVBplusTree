@@ -7,7 +7,7 @@
 #include "string.h"
 
 
-#define DEGREE (3)
+#define DEGREE (128)
 #define MIN_ENTRIES (DEGREE)
 #define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
 
@@ -50,11 +50,14 @@ struct bpt {
     // linked children
     TOID(struct list) list;   
     // key and data to be freed, so I may avoid accessing freed memory
-    TOID(struct string)* free_key;
+    TOID(struct string) free_key;
 };
 
 int
 bpt_new(PMEMobjpool *pop, TOID(struct bpt) *t);
+
+int
+bpt_retrieve(PMEMobjpool *pop, TOID(struct bpt) *t);
 
 int
 bpt_insert(PMEMobjpool *pop,

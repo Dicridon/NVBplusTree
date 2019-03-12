@@ -2,15 +2,25 @@
 #include "en_debug.h"
 #include "debug.h"
 
-int nv_bpt_new(PMEMobjpool *pop, nv_bpt_t *t)
+int
+nv_bpt_new(PMEMobjpool *pop, nv_bpt_t *t)
 {
     DEBUG_ENT();
-    DEBUG_MESG("values to of nv_bpt_t *t: \n"
+    DEBUG_MESG("values of nv_bpt_t *t: \n"
                "address: %p, pool_uuid_lo: %ld, off: %ld\n",
                D_RO(t->t), t->t.oid.pool_uuid_lo, t->t.oid.off)
     int rev = bpt_new(pop, &t->t);
+    DEBUG_MESG("values of nv_bpt_t *t: \n"
+               "address: %p, pool_uuid_lo: %ld, off: %ld\n",
+               D_RO(t->t), t->t.oid.pool_uuid_lo, t->t.oid.off)
+
     DEBUG_LEA();
     return rev;
+}
+
+int nv_bpt_retrieve(PMEMobjpool *pop, nv_bpt_t *t)
+{
+    return bpt_retrieve(pop, &t->t);
 }
 
 
@@ -34,7 +44,7 @@ nv_bpt_get(nv_bpt_t *t, const char *key, char *buffer)
 }
 
 int
-nv_bpt_range(nv_bpt_t *t, const char *start, const char *end, char **buffer)
+nv_bpt_scan(nv_bpt_t *t, const char *start, const char *end, char **buffer)
 {
     return bpt_range(&t->t, start, end, buffer);
 }

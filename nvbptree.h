@@ -22,7 +22,7 @@ int
 nv_bpt_get(nv_bpt_t *t, const char *key, char *buffer);
 
 int
-nv_bpt_range(nv_bpt_t *t, const char *start, const char *end, char **buffer);
+nv_bpt_scan(nv_bpt_t *t, const char *start, const char *end, char **buffer);
 
 int
 nv_bpt_destroy(nv_bpt_t *t);
