@@ -7,7 +7,7 @@
 #include "string.h"
 
 
-#define DEGREE (128)
+#define DEGREE (3)
 #define MIN_ENTRIES (DEGREE)
 #define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
 

@@ -270,8 +270,8 @@ bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
         leaf_ptr->keys[j] = leaf_ptr->keys[j - 1];
         leaf_ptr->data[j] = leaf_ptr->data[j - 1];
     }
-    str_write(pop, &leaf_ptr->keys[i], key);
-    str_write(pop, &leaf_ptr->data[i], value);
+    str_new(pop, &leaf_ptr->keys[i], key);
+    str_new(pop, &leaf_ptr->data[i], value);
     leaf_ptr->num_of_keys++;
     pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
     DEBUG_LEA();
@@ -600,9 +600,6 @@ bpt_range(TOID(struct bpt) *t,
         for (i = 0; i < node_ptr->num_of_keys; i++) {
             if (strcmp(str_get(&node_ptr->keys[i]), end) > 0)
                 return 1;
-
-            // if (strcmp(node->keys[i], start) >= 0)
-            //     printf("%s, ", node->data[i]);
 
             if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
                 strcpy(buffer[j++], str_get(&node_ptr->keys[i]));
@@ -951,7 +948,7 @@ bpt_simple_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
         struct bpt_node *non_leaf_ptr;
         unsigned long long i = 0;
         // no need to use TOID_IS_NULL here
-        if (!non_leaf) {
+        if (non_leaf) {
             non_leaf_ptr = D_RW(*non_leaf);
             for (i = 0; i < non_leaf_ptr->num_of_keys; i++)
                 if (strcmp(str_get(&non_leaf_ptr->keys[i]), key) == 0) {
@@ -960,9 +957,9 @@ bpt_simple_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
         }
         bpt_remove_key_and_data(pop, leaf, key);
         // replace the key
-        if (!non_leaf)
-            str_write(pop,
-                      &non_leaf_ptr->keys[i], str_get(&non_leaf_ptr->keys[0]));
+        if (non_leaf)
+            non_leaf_ptr->keys[i] = D_RO(*leaf)->keys[0];
+        
         return 1;
     } else
         return bpt_remove_key_and_data(pop, leaf, key);
@@ -1241,7 +1238,8 @@ merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
         return 1;
     }
 
-    
+
+    struct bpt_node *dont_use_this_ptr;
     if (!TOID_IS_NULL(left)) {
         for (i = 0; i < parent_ptr->num_of_keys; i++) {
             l_ptr->keys[i+l_ptr->num_of_keys] = parent_ptr->keys[i];
@@ -1252,13 +1250,18 @@ merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
         }
         
         l_ptr->children[i+l_ptr->num_of_children] = parent_ptr->children[i];
-        D_RW(parent_ptr->children[i])->parent = left;
+        struct bpt_node *child_ptr = D_RW(parent_ptr->children[i]);
+        dont_use_this_ptr = child_ptr;
+        // D_RW(parent_ptr->children[i])->parent = left;
+        child_ptr->parent = left;
         parent_ptr->children[i] = NULL_BPT_NODE;
 
         l_ptr->num_of_keys += parent_ptr->num_of_keys;
         l_ptr->num_of_children += parent_ptr->num_of_children;
-        
-        bpt_free_non_leaf(parent);
+
+
+        TOID(struct bpt_node) p = *parent;
+        bpt_free_non_leaf(&p);
         bpt_insert_key(pop, &left, split_key);
         merged = &left;
         pmemobj_persist(pop, l_ptr, sizeof(struct bpt_node));
@@ -1271,6 +1274,7 @@ merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
             child_ptr = D_RW(r_ptr->children[i]);
             // D_RW(r_ptr->children[i])->parent = *parent;
             child_ptr->parent = *parent;
+
             r_ptr->children[i] = NULL_BPT_NODE;
         }
         
@@ -1339,7 +1343,8 @@ merge(PMEMobjpool *pop, TOID(struct bpt) *t,
     if (bpt_is_root(parent) && num_of_keys == 0) {
         D_RW(*t)->root = parent_ptr->children[0];
         D_RW(parent_ptr->children[0])->parent = NULL_BPT_NODE;
-        bpt_free_non_leaf(parent);
+        TOID(struct bpt_node) p = *parent;
+        bpt_free_non_leaf(&p);
         pmemobj_persist(pop, D_RW(*t), sizeof(struct bpt));
         return 1;
     }
@@ -1426,8 +1431,12 @@ bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
             }
     }
     TOID(struct string) *split_key = &parent_ptr->keys[split];
+    TOID(struct bpt_node) child = parent_ptr->children[0];
+
     merge(pop, t, parent, key, split_key);
+    struct bpt_node *child_ptr = D_RW(child);
     str_free(&D_RW(*t)->free_key);
+    
     D_RW(*t)->free_key = NULL_STR;
     return 1;
 }
