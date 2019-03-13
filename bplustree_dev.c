@@ -144,7 +144,15 @@ bpt_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
     }
 
     struct bpt_node *node_ptr = ptr;
-    list_new_node(pop, &node_ptr->link);
+    DEBUG_MESG("node %p\n", node_ptr);
+    /*
+      This is really wierd
+      If I uncomment function call below, my code would trigger seg fault
+      so in order to initialized a bpt_node structure, I have to initialize the 
+      field link outsize this function, or the bpt_node structure will be given 
+      a zero pool_id
+     */
+    // list_new_node(pop, &node_ptr->link);
     DEBUG_LEA();
     return 0;
 }
@@ -166,6 +174,18 @@ bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
     
     list_new(pop, &bpt_ptr->list);
 
+    list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
+    DEBUG_MESG("head is (%ld, %ld)\n",
+               D_RO(bpt_ptr->list)->head.oid.pool_uuid_lo & 0xff,
+               D_RO(bpt_ptr->list)->head.oid.off);
+
+    DEBUG_MESG("rootlink is (%ld, %ld)\n",
+               root_ptr->link.oid.pool_uuid_lo & 0xff, root_ptr->link.oid.off);
+
+    DEBUG_MESG("next of head is (%ld, %ld)\n",
+               D_RO(D_RO(bpt_ptr->list)->head)->next.oid.pool_uuid_lo & 0xff,
+               D_RO(D_RO(bpt_ptr->list)->head)->next.oid.off);
+    
     bpt_ptr->free_key = NULL_STR;
     bpt_ptr->level = 1;
 
@@ -201,8 +221,14 @@ static int
 bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
 {
     DEBUG_ENT();
+    DEBUG_MESG("node %p pool %ld, off %ld\n",
+               node, node->oid.pool_uuid_lo, node->oid.off);
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
+    DEBUG_MESG("node %p pool %ld, off %ld\n",
+               node, node->oid.pool_uuid_lo, node->oid.off);
     struct bpt_node *node_ptr = D_RW(*node);
+    DEBUG_MESG("node %p pool %ld, off %ld\n",
+               node, node->oid.pool_uuid_lo, node->oid.off);
 
     // filed link is not initialized here, because interfaces in list.c
     // will handle the initialization
@@ -743,6 +769,12 @@ bpt_print_leaves(const TOID(struct bpt) *t)
 {
     const struct bpt *t_ptr = D_RO(*t);
     const TOID(struct list_node) *p = &D_RO(D_RO(t_ptr->list)->head)->next;
+
+    void *fafa = D_RO(*p);
+
+    TOID(struct bpt_node) * root = &t_ptr->root;
+    struct bpt_node *root_ptr = D_RW(*root);
+    TOID(struct list_node) *ahahah = &root_ptr->link;
     
     const TOID(struct bpt_node) *node;
     const struct bpt_node *node_ptr;

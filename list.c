@@ -16,7 +16,7 @@ list_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
     
     node_ptr->prev = *prev;
     node_ptr->next = *next;
-
+    
     pmemobj_persist(pop, node_ptr, sizeof(TOID(struct list_node)));
     DEBUG_LEA();
     return 0;
@@ -25,14 +25,16 @@ list_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
 int
 list_new_node(PMEMobjpool *pop, TOID(struct list_node) *node)
 {
-    DEBUG_ENT();
-    struct list_node arg = {
-        .prev = TOID_NULL(struct list_node),
-        .next = TOID_NULL(struct list_node)
-    };
-    int rev = POBJ_NEW(pop, node, struct list_node, list_node_constr,&arg);
-    DEBUG_LEA();
-    return rev;
+     DEBUG_ENT();
+     struct list_node arg = {
+         .prev = TOID_NULL(struct list_node),
+         .next = TOID_NULL(struct list_node)
+     };
+     DEBUG_MESG("node %p\n", node);
+     int rev = POBJ_NEW(pop, node, struct list_node, list_node_constr,&arg);
+     DEBUG_LEA();
+     return rev;
+    return 1;
 }
 
 // the address of root object may vary due to the change of size
