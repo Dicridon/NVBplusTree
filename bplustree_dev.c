@@ -770,12 +770,6 @@ bpt_print_leaves(const TOID(struct bpt) *t)
     const struct bpt *t_ptr = D_RO(*t);
     const TOID(struct list_node) *p = &D_RO(D_RO(t_ptr->list)->head)->next;
 
-    void *fafa = D_RO(*p);
-
-    TOID(struct bpt_node) * root = &t_ptr->root;
-    struct bpt_node *root_ptr = D_RW(*root);
-    TOID(struct list_node) *ahahah = &root_ptr->link;
-    
     const TOID(struct bpt_node) *node;
     const struct bpt_node *node_ptr;
     while(!TOID_EQUALS(*p, D_RO(t_ptr->list)->head)) {
