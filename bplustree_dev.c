@@ -176,12 +176,10 @@ bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
     struct bpt_node *root_ptr = D_RW(bpt_ptr->root);
     
     list_new(pop, &bpt_ptr->list);
-#ifdef __DEBUG__
     if (TOID_IS_NULL(bpt_ptr->list)) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
 
     // list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
     root_ptr->link.prev = D_RW(bpt_ptr->list)->head.oid;
@@ -226,12 +224,10 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
     DEBUG_MESG("node %p pool %ld, off %ld\n",
                node, node->oid.pool_uuid_lo, node->oid.off);
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
-#ifdef __DEBUG__
     if (TOID_IS_NULL(*node)) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
         
     DEBUG_MESG("node %p pool %ld, off %ld\n",
                node, node->oid.pool_uuid_lo, node->oid.off);
@@ -263,12 +259,10 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
 static int
 bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
-#ifdef __DEBUG__
     if (TOID_IS_NULL(*node)) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
     struct bpt_node *node_ptr = D_RW(*node);
 
     // filed link is not initialized here, because interfaces in list.c
@@ -318,21 +312,18 @@ bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
         leaf_ptr->data[j] = leaf_ptr->data[j - 1];
     }
     str_new(pop, &leaf_ptr->keys[i], key);
-#ifdef __DEBUG__
     if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
     
     str_new(pop, &leaf_ptr->data[i], value);
 
-#ifdef __DEBUG__
     if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
+
     leaf_ptr->num_of_keys++;
     pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
     DEBUG_LEA();
@@ -478,6 +469,8 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
         parent_ptr->num_of_keys -= parent_ptr->num_of_keys - split;
         parent_ptr->num_of_children = parent_ptr->num_of_keys + 1;
 
+        pmemobj_persist(pop, new_parent_ptr, sizeof(struct bpt_node));
+        pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
         
         // recursive handling
         bpt_insert_adjust(pop, t, &parent, &new_parent);
@@ -490,6 +483,7 @@ bpt_insert_adjust(PMEMobjpool *pop, TOID(struct bpt) *t,
             }
             new_ptr->keys[new_ptr->num_of_keys - 1] = NULL_STR;
             new_ptr->num_of_keys--;
+            pmemobj_persist(pop, new_ptr, sizeof(struct bpt_node));
         }
     }
     DEBUG_LEA();
@@ -528,21 +522,17 @@ bpt_complex_insert(PMEMobjpool *pop,
     }
 
     str_new(pop, &leaf_ptr->keys[i], key);
-#ifdef __DEBUG__
     if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
-    
+
     str_new(pop, &leaf_ptr->data[i], value);
     
-#ifdef __DEBUG__
     if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
         printf("No memory in %s\n", __FUNCTION__);
         assert(0);
     }
-#endif
 
     leaf_ptr->num_of_keys++;
     
@@ -571,6 +561,8 @@ bpt_complex_insert(PMEMobjpool *pop,
      pmemobj_direct(leaf_ptr->link.next))->link.prev = leaf->oid;
     bpt_insert_adjust(pop, t, leaf, &new_leaf);
     pmemobj_persist(pop, t_ptr, sizeof(struct bpt));
+    pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
+    pmemobj_persist(pop, new_leaf_ptr, sizeof(struct bpt_node));
     DEBUG_LEA();
     return 1;
 }
@@ -681,11 +673,40 @@ bpt_range(TOID(struct bpt) *t,
         for (i = 0; i < node_ptr->num_of_keys; i++) {
             if (strcmp(str_get(&node_ptr->keys[i]), end) > 0)
                 return 1;
-
-            if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
+            if (buffer == NULL)
+                ;
+            else if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
                 strcpy(buffer[j++], str_get(&node_ptr->keys[i]));
         }
         p = pmemobj_direct(p->next);
+        // p_ptr = D_RO(*p);
+    }
+    return -1;
+}
+
+int
+bpt_range_test(TOID(struct bpt) *t, const char *start, unsigned long long n)
+{
+    const struct bpt *t_ptr = D_RO(*t);
+    
+    TOID(struct bpt_node) *leaf = find_leaf(t, start);
+    unsigned long long i = 0;
+
+    const struct list_node *p = &D_RO(*leaf)->link;
+
+    // TOID(struct bpt_node) *node;
+    const struct bpt_node *node_ptr;
+    while(n > 0 && p != D_RO(D_RO(t_ptr->list)->head)) {
+        // notice that address of p is already the address of a leaf
+        // so do not used D_RO again
+        // node = (TOID(struct bpt_node) *)p;
+        node_ptr = (struct bpt_node *)p;
+        for (i = 0; i < node_ptr->num_of_keys; i++) {
+            if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
+                continue;
+        }
+        p = pmemobj_direct(p->next);
+        n--;
         // p_ptr = D_RO(*p);
     }
     return -1;
@@ -1022,6 +1043,7 @@ redistribute_leaf(PMEMobjpool *pop, TOID(struct bpt) *t,
         // str_write(pop,
         //           &non_leaf_ptr->keys[idx_replace_key], str_get(replace_key));
         non_leaf_ptr->keys[idx_replace_key] = *replace_key;
+        pmemobj_persist(pop, non_leaf_ptr, sizeof(struct bpt_node));
     }
 
     return 1;
@@ -1048,8 +1070,10 @@ bpt_simple_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
         }
         bpt_remove_key_and_data(pop, leaf, key);
         // replace the key
-        if (non_leaf)
+        if (non_leaf) {
             non_leaf_ptr->keys[i] = D_RO(*leaf)->keys[0];
+            pmemobj_persist(pop, non_leaf_ptr, sizeof(struct bpt_node));
+        }
         
         return 1;
     } else
@@ -1134,6 +1158,7 @@ merge_leaves(PMEMobjpool *pop,
         next->prev = leaf_ptr->link.prev;
         left_ptr->num_of_keys += leaf_ptr->num_of_keys;
         bpt_free_leaf(leaf);
+        pmemobj_persist(pop, left_ptr, sizeof(struct bpt_node));
         rev = left;
     } else {
         // merge leaf into its right sibling
@@ -1156,6 +1181,7 @@ merge_leaves(PMEMobjpool *pop,
         parent_ptr->children[idx_right] = *leaf;
         leaf_ptr->num_of_keys += right_ptr->num_of_keys;
         bpt_free_leaf(right);
+        pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
         rev = leaf;
     }
     
@@ -1165,6 +1191,7 @@ merge_leaves(PMEMobjpool *pop,
         parent_ptr->children[j] = parent_ptr->children[j+1];
     }
     parent_ptr->num_of_children--;
+    pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
     return rev;
 }
 
@@ -1191,6 +1218,7 @@ bpt_insert_key(PMEMobjpool *pop,
     // str_write(pop, &t_ptr->keys[i], key);
     t_ptr->keys[i] = *__key__;
     t_ptr->num_of_keys++;
+    pmemobj_persist(pop, t_ptr, sizeof(struct bpt_node));
     return 1;
 }
 
@@ -1440,9 +1468,10 @@ merge(PMEMobjpool *pop, TOID(struct bpt) *t,
         }
     }
 
-    pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
+
     // parent has enough keys
     parent_ptr->num_of_keys--;
+    pmemobj_persist(pop, parent_ptr, sizeof(struct bpt_node));
     unsigned long long num_of_keys = parent_ptr->num_of_keys;
 
     if (num_of_keys >= DEGREE / 2 || (bpt_is_root(parent) && num_of_keys >= 1))
@@ -1491,8 +1520,8 @@ merge(PMEMobjpool *pop, TOID(struct bpt) *t,
     return 1;
 }
 
-// this functin first finish leaf merging
-// then call merge to see if it is necessary to merge parent
+// this function first finishes leaf merging
+// then calls merge to see if it is necessary to merge parent
 /*
   procedure:
       1. find leaf and internal node which contains the key to be deleted
@@ -1536,6 +1565,7 @@ bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
             if (strcmp(str_get(&non_leaf_ptr->keys[j]), key) == 0) {
                 // str_write(pop, &non_leaf_ptr->keys[j], replace_key);
                 non_leaf_ptr->keys[j] = replace_key;
+                pmemobj_persist(pop, non_leaf_ptr, sizeof(struct bpt_node));
                 break;
             }
     }
@@ -1547,6 +1577,7 @@ bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
     str_free(&D_RW(*t)->free_key);
     
     D_RW(*t)->free_key = NULL_STR;
+    pmemobj_persist(pop, D_RW(*t), sizeof(struct bpt));
     return 1;
 }
 

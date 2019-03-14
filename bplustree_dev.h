@@ -73,6 +73,9 @@ int
 bpt_range(TOID(struct bpt) *t, const char *start, const char *end, char **buffer);
 
 int
+bpt_range_test(TOID(struct bpt) *t, const char *start, unsigned long long n);
+
+int
 bpt_destroy(TOID(struct bpt) *t);
 
 // int

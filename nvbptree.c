@@ -50,6 +50,12 @@ nv_bpt_scan(nv_bpt_t *t, const char *start, const char *end, char **buffer)
 }
 
 int
+nv_bpt_scan_test(nv_bpt_t *t, const char *start, unsigned long long n)
+{
+    return bpt_range_test(&t->t, start, n);
+}
+
+int
 nv_bpt_destroy(nv_bpt_t *t)
 {
     return bpt_destroy(&t->t);
