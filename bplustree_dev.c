@@ -514,9 +514,11 @@ bpt_complex_insert(PMEMobjpool *pop,
     leaf_ptr->num_of_keys -= leaf_ptr->num_of_keys - split;
     
     // list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
+    struct list_node *next = pmemobj_direct(leaf_ptr->link.next);
     new_leaf_ptr->link.prev = leaf->oid;
     new_leaf_ptr->link.next = leaf_ptr->link.next;
     leaf_ptr->link.next = new_leaf.oid;
+    next->prev = new_leaf.oid;
     ((struct bpt_node*)
      pmemobj_direct(leaf_ptr->link.next))->link.prev = leaf->oid;
     bpt_insert_adjust(pop, t, leaf, &new_leaf);
@@ -756,6 +758,13 @@ bpt_print(const TOID(struct bpt) * t)
                walk->oid.pool_uuid_lo & 0xff, walk->oid.off,
                D_RO(walk_ptr->parent),
                walk_ptr->parent.oid.pool_uuid_lo & 0xff, walk_ptr->parent.oid.off);
+        if (walk_ptr->type == LEAF)
+            printf("prev: (%ld, %ld), next: (%ld, %ld)\n",
+                   walk_ptr->link.prev.pool_uuid_lo & 0xff,
+                   walk_ptr->link.prev.off,
+                   walk_ptr->link.next.pool_uuid_lo & 0xff,
+                   walk_ptr->link.next.off);
+        
         if (walk_ptr->type == NON_LEAF)
             printf("non leaf: %llu children, %llu keys\n",
                    walk_ptr->num_of_children, walk_ptr->num_of_keys);
@@ -1091,10 +1100,10 @@ merge_leaves(PMEMobjpool *pop,
         // right->link.prev->next = right->link.next;
         // right->link.next->prev =right->link.prev;
         // list_remove(pop, &right_ptr->link);
-        struct list_node *prev = pmemobj_direct(leaf_ptr->link.prev);
-        struct list_node *next = pmemobj_direct(leaf_ptr->link.next);
-        prev->next = leaf_ptr->link.next;
-        next->prev = leaf_ptr->link.prev;
+        struct list_node *prev = pmemobj_direct(right_ptr->link.prev);
+        struct list_node *next = pmemobj_direct(right_ptr->link.next);
+        prev->next = right_ptr->link.next;
+        next->prev = right_ptr->link.prev;
         parent_ptr->children[idx_right] = *leaf;
         leaf_ptr->num_of_keys += right_ptr->num_of_keys;
         bpt_free_leaf(right);
