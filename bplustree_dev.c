@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <assert.h>
 #include "list.h"
 #include "queue.h"
 #include "bplustree_dev.h"
@@ -175,6 +176,12 @@ bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
     struct bpt_node *root_ptr = D_RW(bpt_ptr->root);
     
     list_new(pop, &bpt_ptr->list);
+#ifdef __DEBUG__
+    if (TOID_IS_NULL(bpt_ptr->list)) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
 
     // list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
     root_ptr->link.prev = D_RW(bpt_ptr->list)->head.oid;
@@ -219,6 +226,13 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
     DEBUG_MESG("node %p pool %ld, off %ld\n",
                node, node->oid.pool_uuid_lo, node->oid.off);
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
+#ifdef __DEBUG__
+    if (TOID_IS_NULL(*node)) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
+        
     DEBUG_MESG("node %p pool %ld, off %ld\n",
                node, node->oid.pool_uuid_lo, node->oid.off);
     struct bpt_node *node_ptr = D_RW(*node);
@@ -249,6 +263,12 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
 static int
 bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
     POBJ_NEW(pop, node, struct bpt_node, bpt_node_constr, NULL);
+#ifdef __DEBUG__
+    if (TOID_IS_NULL(*node)) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
     struct bpt_node *node_ptr = D_RW(*node);
 
     // filed link is not initialized here, because interfaces in list.c
@@ -298,7 +318,21 @@ bpt_simple_insert(PMEMobjpool *pop, TOID(struct bpt_node) *leaf,
         leaf_ptr->data[j] = leaf_ptr->data[j - 1];
     }
     str_new(pop, &leaf_ptr->keys[i], key);
+#ifdef __DEBUG__
+    if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
+    
     str_new(pop, &leaf_ptr->data[i], value);
+
+#ifdef __DEBUG__
+    if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
     leaf_ptr->num_of_keys++;
     pmemobj_persist(pop, leaf_ptr, sizeof(struct bpt_node));
     DEBUG_LEA();
@@ -494,7 +528,21 @@ bpt_complex_insert(PMEMobjpool *pop,
     }
 
     str_new(pop, &leaf_ptr->keys[i], key);
+#ifdef __DEBUG__
+    if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
+    
     str_new(pop, &leaf_ptr->data[i], value);
+    
+#ifdef __DEBUG__
+    if (TOID_IS_NULL((leaf_ptr->keys[i]))) {
+        printf("No memory in %s\n", __FUNCTION__);
+        assert(0);
+    }
+#endif
 
     leaf_ptr->num_of_keys++;
     
