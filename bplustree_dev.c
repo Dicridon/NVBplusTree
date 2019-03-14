@@ -136,6 +136,8 @@ bpt_print_leaves(const TOID(struct bpt) *t);
 static int
 bpt_node_constr(PMEMobjpool *pop, void *ptr, void *arg)
 {
+    if (!pop)
+        return -1;  // just silence the warnings
     DEBUG_ENT();
     if (arg) {
         DEBUG_MESG("non empty args\n");
@@ -174,17 +176,10 @@ bpt_constr(PMEMobjpool *pop, void *ptr, void *arg)
     
     list_new(pop, &bpt_ptr->list);
 
-    list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
-    DEBUG_MESG("head is (%ld, %ld)\n",
-               D_RO(bpt_ptr->list)->head.oid.pool_uuid_lo & 0xff,
-               D_RO(bpt_ptr->list)->head.oid.off);
-
-    DEBUG_MESG("rootlink is (%ld, %ld)\n",
-               root_ptr->link.oid.pool_uuid_lo & 0xff, root_ptr->link.oid.off);
-
-    DEBUG_MESG("next of head is (%ld, %ld)\n",
-               D_RO(D_RO(bpt_ptr->list)->head)->next.oid.pool_uuid_lo & 0xff,
-               D_RO(D_RO(bpt_ptr->list)->head)->next.oid.off);
+    // list_add_to_head(pop, &bpt_ptr->list, &root_ptr->link);
+    root_ptr->link.prev = D_RW(bpt_ptr->list)->head.oid;
+    root_ptr->link.next = D_RW(D_RW(bpt_ptr->list)->head)->next;
+    D_RW(D_RW(bpt_ptr->list)->head)->next = bpt_ptr->root.oid;
     
     bpt_ptr->free_key = NULL_STR;
     bpt_ptr->level = 1;
@@ -236,9 +231,12 @@ bpt_new_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node)
     node_ptr->num_of_keys = 0;
     node_ptr->parent = NULL_BPT_NODE;
     node_ptr->type = LEAF;
-    list_new_node(pop, &node_ptr->link);
-    D_RW(node_ptr->link)->prev = node_ptr->link;
-    D_RW(node_ptr->link)->next = node_ptr->link;
+    // list_new_node(pop, &node_ptr->link);
+    // D_RW(node_ptr->link)->prev = node_ptr->link;
+    // D_RW(node_ptr->link)->next = node_ptr->link;
+    node_ptr->link.prev = node->oid;
+    node_ptr->link.next = node->oid;
+    
     for (int i = 0; i < DEGREE; i++) {
         node_ptr->keys[i] = NULL_STR;
         node_ptr->data[i] = NULL_STR;        
@@ -259,9 +257,12 @@ bpt_new_non_leaf(PMEMobjpool *pop, TOID(struct bpt_node) *node) {
     node_ptr->num_of_keys = 0;
     node_ptr->parent = NULL_BPT_NODE;
     node_ptr->type = NON_LEAF;
-    list_new_node(pop, &node_ptr->link);
-    D_RW(node_ptr->link)->prev = node_ptr->link;
-    D_RW(node_ptr->link)->next = node_ptr->link;
+    // list_new_node(pop, &node_ptr->link);
+    // D_RW(node_ptr->link)->prev = node_ptr->link;
+    // D_RW(node_ptr->link)->next = node_ptr->link;
+    node_ptr->link.prev = node->oid;
+    node_ptr->link.next = node->oid;
+    
     for (int i = 0; i < DEGREE; i++) {
         node_ptr->keys[i] = NULL_STR;
         node_ptr->children[i] = NULL_BPT_NODE;
@@ -512,7 +513,12 @@ bpt_complex_insert(PMEMobjpool *pop,
     new_leaf_ptr->num_of_keys = i;
     leaf_ptr->num_of_keys -= leaf_ptr->num_of_keys - split;
     
-    list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
+    // list_add(pop, &leaf_ptr->link, &new_leaf_ptr->link);
+    new_leaf_ptr->link.prev = leaf->oid;
+    new_leaf_ptr->link.next = leaf_ptr->link.next;
+    leaf_ptr->link.next = new_leaf.oid;
+    ((struct bpt_node*)
+     pmemobj_direct(leaf_ptr->link.next))->link.prev = leaf->oid;
     bpt_insert_adjust(pop, t, leaf, &new_leaf);
     pmemobj_persist(pop, t_ptr, sizeof(struct bpt));
     DEBUG_LEA();
@@ -613,16 +619,15 @@ bpt_range(TOID(struct bpt) *t,
     TOID(struct bpt_node) *leaf = find_leaf(t, start);
     unsigned long long i = 0, j = 0;
 
-    const TOID(struct list_node) *p = &D_RO(*leaf)->link;
-    const struct list_node *p_ptr = D_RO(*p);
+    const struct list_node *p = &D_RO(*leaf)->link;
 
-    TOID(struct bpt_node) *node;
+    // TOID(struct bpt_node) *node;
     const struct bpt_node *node_ptr;
-    while(!TOID_EQUALS(*p, D_RO(t_ptr->list)->head)) {
+    while(p != D_RO(D_RO(t_ptr->list)->head)) {
         // notice that address of p is already the address of a leaf
         // so do not used D_RO again
-        node = (TOID(struct bpt_node) *)p;
-        node_ptr = D_RO(*node);
+        // node = (TOID(struct bpt_node) *)p;
+        node_ptr = (struct bpt_node *)p;
         for (i = 0; i < node_ptr->num_of_keys; i++) {
             if (strcmp(str_get(&node_ptr->keys[i]), end) > 0)
                 return 1;
@@ -630,8 +635,8 @@ bpt_range(TOID(struct bpt) *t,
             if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
                 strcpy(buffer[j++], str_get(&node_ptr->keys[i]));
         }
-        p = &p_ptr->next;
-        p_ptr = D_RO(*p);
+        p = pmemobj_direct(p->next);
+        // p_ptr = D_RO(*p);
     }
     return -1;
 }
@@ -768,17 +773,19 @@ void
 bpt_print_leaves(const TOID(struct bpt) *t)
 {
     const struct bpt *t_ptr = D_RO(*t);
-    const TOID(struct list_node) *p = &D_RO(D_RO(t_ptr->list)->head)->next;
+    const struct list_node *p =
+        pmemobj_direct(D_RO(D_RO(t_ptr->list)->head)->next);
 
-    const TOID(struct bpt_node) *node;
+    // const TOID(struct bpt_node) *node;
     const struct bpt_node *node_ptr;
-    while(!TOID_EQUALS(*p, D_RO(t_ptr->list)->head)) {
-        node = (TOID(struct bpt_node) *)p;
-        node_ptr = D_RO(*node);
+    while(p != D_RO(D_RO(t_ptr->list)->head)) {
+        // node = (TOID(struct bpt_node) *)p;
+        node_ptr = (struct bpt_node *)p;
         for (unsigned long long i = 0; i < node_ptr->num_of_keys; i++) {
             printf("%s, ", str_get(&node_ptr->keys[i]));
         }
-        p = &D_RO(*p)->next;
+        // p = &D_RO(*p)->next;
+        p = pmemobj_direct(p->next);
     }
     puts("");
 }
@@ -998,6 +1005,10 @@ static TOID(struct bpt_node) *
 merge_leaves(PMEMobjpool *pop,
              TOID(struct bpt) *t, TOID(struct bpt_node) *leaf, const char *key)
 {
+    if (!pop) {
+        return NULL;
+    }
+    
     struct bpt *t_ptr = D_RW(*t);
     struct bpt_node *leaf_ptr = D_RW(*leaf);
     
@@ -1058,7 +1069,11 @@ merge_leaves(PMEMobjpool *pop,
         }
         // leaf_ptr->link.prev_ptr->next = leaf_ptr->link.next;
         // leaf_ptr->link.next_ptr->prev = leaf_ptr->link.prev;
-        list_remove(pop, &leaf_ptr->link);
+        // list_remove(pop, &leaf_ptr->link);
+        struct list_node *prev = pmemobj_direct(leaf_ptr->link.prev);
+        struct list_node *next = pmemobj_direct(leaf_ptr->link.next);
+        prev->next = leaf_ptr->link.next;
+        next->prev = leaf_ptr->link.prev;
         left_ptr->num_of_keys += leaf_ptr->num_of_keys;
         bpt_free_leaf(leaf);
         rev = left;
@@ -1075,7 +1090,11 @@ merge_leaves(PMEMobjpool *pop,
         }
         // right->link.prev->next = right->link.next;
         // right->link.next->prev =right->link.prev;
-        list_remove(pop, &right_ptr->link);
+        // list_remove(pop, &right_ptr->link);
+        struct list_node *prev = pmemobj_direct(leaf_ptr->link.prev);
+        struct list_node *next = pmemobj_direct(leaf_ptr->link.next);
+        prev->next = leaf_ptr->link.next;
+        next->prev = leaf_ptr->link.prev;
         parent_ptr->children[idx_right] = *leaf;
         leaf_ptr->num_of_keys += right_ptr->num_of_keys;
         bpt_free_leaf(right);
@@ -1095,6 +1114,8 @@ merge_leaves(PMEMobjpool *pop,
 static int
 bpt_insert_key(PMEMobjpool *pop,
                TOID(struct bpt_node) *t, const TOID(struct string) *__key__) {
+    if (!pop)
+        return -1;
     struct bpt_node *t_ptr = D_RW(*t);
     const char *key = str_get(__key__);
     unsigned long long i = 0;
@@ -1213,7 +1234,7 @@ merge_internal(PMEMobjpool *pop, TOID(struct bpt) *t,
     TOID(struct bpt_node) grandparent = parent_ptr->parent;
     struct bpt_node *gparent_ptr = D_RW(grandparent);
 
-    struct bpt_node *child_ptr = D_RW(parent_ptr->children[0]);
+    // struct bpt_node *child_ptr = D_RW(parent_ptr->children[0]);
     // merge this parent and its sibling
     unsigned long long idx_left = 0;
     unsigned long long idx_right = 0;
@@ -1457,10 +1478,10 @@ bpt_complex_delete(PMEMobjpool *pop, TOID(struct bpt) *t,
             }
     }
     TOID(struct string) *split_key = &parent_ptr->keys[split];
-    TOID(struct bpt_node) child = parent_ptr->children[0];
+    // TOID(struct bpt_node) child = parent_ptr->children[0];
 
     merge(pop, t, parent, key, split_key);
-    struct bpt_node *child_ptr = D_RW(child);
+    // struct bpt_node *child_ptr = D_RW(child);
     str_free(&D_RW(*t)->free_key);
     
     D_RW(*t)->free_key = NULL_STR;

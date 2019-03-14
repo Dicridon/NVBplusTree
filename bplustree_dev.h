@@ -7,7 +7,7 @@
 #include "string.h"
 
 
-#define DEGREE (4)
+#define DEGREE (3)
 #define MIN_ENTRIES (DEGREE)
 #define NULL_BPT_NODE (TOID_NULL(struct bpt_node))
 
@@ -28,7 +28,7 @@ struct bpt_node {
         struct {
             // put link at the beginning of the structure
             // so we can traverse all the leaves
-            TOID(struct list_node) link;
+            struct list_node link;
             TOID(struct string) data[DEGREE];
         };
         struct {
