@@ -691,24 +691,31 @@ bpt_range_test(TOID(struct bpt) *t, const char *start, unsigned long long n)
     
     TOID(struct bpt_node) *leaf = find_leaf(t, start);
     unsigned long long i = 0;
-
+    unsigned long long ct = 0;
     const struct list_node *p = &D_RO(*leaf)->link;
 
     // TOID(struct bpt_node) *node;
     const struct bpt_node *node_ptr;
+    const char *end = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
     while(n > 0 && p != D_RO(D_RO(t_ptr->list)->head)) {
         // notice that address of p is already the address of a leaf
         // so do not used D_RO again
         // node = (TOID(struct bpt_node) *)p;
+
         node_ptr = (struct bpt_node *)p;
         for (i = 0; i < node_ptr->num_of_keys; i++) {
-            if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0)
-                continue;
+            if (strcmp(str_get(&node_ptr->keys[i]), end) > 0)
+                return 1;
+            if (strcmp(str_get(&node_ptr->keys[i]), start) >= 0) {
+                ct++;
+                if (--n == 0)
+                    break;
+            }
         }
         p = pmemobj_direct(p->next);
-        n--;
         // p_ptr = D_RO(*p);
     }
+    printf("%llu keys are scanned, n is %llu\n", ct, n);
     return -1;
 }
 
@@ -860,7 +867,7 @@ bpt_print_leaves(const TOID(struct bpt) *t)
         // node = (TOID(struct bpt_node) *)p;
         node_ptr = (struct bpt_node *)p;
         for (unsigned long long i = 0; i < node_ptr->num_of_keys; i++) {
-            printf("%s, ", str_get(&node_ptr->keys[i]));
+            // printf("%s, ", str_get(&node_ptr->keys[i]));
         }
         // p = &D_RO(*p)->next;
         p = pmemobj_direct(p->next);
