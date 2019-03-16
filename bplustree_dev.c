@@ -726,7 +726,6 @@ bpt_destroy(TOID(struct bpt) *t)
     struct bpt *t_ptr = D_RW(*t);
     
     if (TOID_IS_NULL(t_ptr->root)) {
-        printf("empty tree\n");
         return 1;
     }
     
