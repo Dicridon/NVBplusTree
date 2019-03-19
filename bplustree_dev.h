@@ -1,5 +1,5 @@
-#ifndef __FROST_BPTREE_DEV__
-#define __FROST_BPTREE_DEV__
+#ifndef __FROST_NV_BPTREE_DEV__
+#define __FROST_NV_BPTREE_DEV__
 
 #include <stdio.h>
 #include <libpmemobj.h>

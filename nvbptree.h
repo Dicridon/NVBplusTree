@@ -1,5 +1,5 @@
-#ifndef __FORST_BPTREE__
-#define __FORST_BPTREE__
+#ifndef __FORST_NV_BPTREE__
+#define __FORST_NV_BPTREE__
 #include <libpmemobj.h>
 #include "bplustree_dev.h"
 
