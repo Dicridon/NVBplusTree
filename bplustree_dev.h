@@ -1,6 +1,63 @@
 #ifndef __FROST_NV_BPTREE_DEV__
 #define __FROST_NV_BPTREE_DEV__
 
+#include <iostream>
+// #include <libpmemobj++/make_persistent.hpp>
+// #include <libpmemobj++/p.hpp>
+// #include <libpmemobj++/persistent_ptr.hpp>
+// #include <libpmemobj++/pool.hpp>
+// #include <libpmemobj++/transaction.hpp>
+// #include <libpmemobj_cpp_examples_common.hpp>
+
+enum bpt_node_type {
+    NON_LEAF,
+    LEAF,
+};
+
+class Node {
+    using KeyArray = pmem::obj::persistent_ptr<std::array<std::string, DEGREE> >;
+    using NVNodePtr = pmem::obj::persistent_ptr<Node>;
+protected:
+    enum bpt_node_type type;
+    uint64_t num_of_keys;
+    KeyArray keys;
+    NVNodePtr parent;
+public:
+    Node() = default;
+    void initialize(enum bpt_node_type type, uint64_t num_of_keys);
+    ~Node() {
+        pmem::obj::delete_persist<KeyArray>(keys);
+        parent = nullptr;
+    }
+};
+
+class InnerNode : public Node{
+    using ChildrenArray = pmem::obj::persistent_ptr<std::array<InnerNode, DEGREE+1> >;
+private:
+    uint64_t num_of_children;
+    ChildrenArray children;
+public:
+    InnerNode() = default;
+    void initialize(uint64_t num_of_children)
+    ~InnerNode() {
+        pmem::obj::delete_persist<ChildrenArray>(children);
+    }
+};
+
+class LeafNode : public Node{
+    using DataArray = pmem::obj::persistent_ptr<std::string>;
+private:
+    uint64_t num_of_children;
+    DataArray data;
+public:
+    LeafNode() = default;
+    void initialize(uint64_t num_of_children)
+    ~LeafNode() {
+        pmem::obj::delete_persist<DataArray>(data);
+    }
+};
+
+
 #include <stdio.h>
 #include <libpmemobj.h>
 #include "list.h"
