@@ -32,7 +32,7 @@ public:
 };
 
 class InnerNode : public Node{
-    using ChildrenArray = pmem::obj::persistent_ptr<std::array<InnerNode, DEGREE+1> >;
+    using ChildrenArray = pmem::obj::persistent_ptr<std::array<Node, DEGREE+1> >;
 private:
     uint64_t num_of_children;
     ChildrenArray children;
@@ -47,11 +47,11 @@ public:
 class LeafNode : public Node{
     using DataArray = pmem::obj::persistent_ptr<std::string>;
 private:
-    uint64_t num_of_children;
+    uint64_t num_of_keys;
     DataArray data;
 public:
     LeafNode() = default;
-    void initialize(uint64_t num_of_children)
+    void initialize(uint64_t num_of_keys)
     ~LeafNode() {
         pmem::obj::delete_persist<DataArray>(data);
     }
